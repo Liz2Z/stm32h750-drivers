@@ -1,8 +1,20 @@
 // src/rc522.rs
 
 use crate::types::{CardType, KeyType, Error};
-use embedded_hal::spi::SpiBus;
-use embedded_hal::digital::OutputPin;
+use nb::block;
+
+// 自定义 trait 以避免 embedded-hal 版本冲突
+pub trait SpiDevice {
+    type Error;
+    fn send(&mut self, byte: u8) -> nb::Result<(), Self::Error>;
+    fn read(&mut self) -> nb::Result<u8, Self::Error>;
+}
+
+pub trait PinDevice {
+    type Error;
+    fn set_low(&mut self) -> Result<(), Self::Error>;
+    fn set_high(&mut self) -> Result<(), Self::Error>;
+}
 
 // RC522 寄存器地址
 const COMMAND_REG: u8 = 0x01 << 3;
@@ -34,16 +46,16 @@ pub struct RC522<SPI, RST> {
     rst: RST,
 }
 
-impl<SPI, E, RST> RC522<SPI, RST>
+impl<SPI, SE, RST, RE> RC522<SPI, RST>
 where
-    SPI: SpiBus<Error = E>,
-    RST: OutputPin<Error = E>,
+    SPI: SpiDevice<Error = SE>,
+    RST: PinDevice<Error = RE>,
 {
-    pub fn new(mut spi: SPI, mut rst: RST) -> Result<Self, Error<E>> {
+    pub fn new(spi: SPI, mut rst: RST) -> Result<Self, Error<SE>> {
         // 硬件复位
-        rst.set_low().map_err(Error::Spi)?;
+        rst.set_low().ok();
         cortex_m::asm::delay(10_000);
-        rst.set_high().map_err(Error::Spi)?;
+        rst.set_high().ok();
         cortex_m::asm::delay(100_000);
 
         let mut rc522 = Self { spi, rst };
@@ -61,30 +73,32 @@ where
         Ok(rc522)
     }
 
-    fn read_reg(&mut self, reg: u8) -> Result<u8, Error<E>> {
+    fn read_reg(&mut self, reg: u8) -> Result<u8, Error<SE>> {
         let addr = 0x80 | reg;
-        let mut tx = [addr, 0x00];
-        let mut rx = [0u8; 2];
-
-        self.spi.transfer(&mut rx, &tx).map_err(Error::Spi)?;
-        Ok(rx[1])
+        block!(self.spi.send(addr)).map_err(Error::Spi)?;
+        block!(self.spi.send(0x00)).map_err(Error::Spi)?;
+        // Read first byte (dummy)
+        let _ = block!(self.spi.read()).map_err(Error::Spi)?;
+        // Read second byte (actual data)
+        block!(self.spi.read()).map_err(Error::Spi)
     }
 
-    fn write_reg(&mut self, reg: u8, val: u8) -> Result<(), Error<E>> {
+    fn write_reg(&mut self, reg: u8, val: u8) -> Result<(), Error<SE>> {
         let addr = reg & 0x7F;
-        let tx = [addr, val];
-        let mut rx = [0u8; 2];
-
-        self.spi.transfer(&mut rx, &tx).map_err(Error::Spi)?;
+        block!(self.spi.send(addr)).map_err(Error::Spi)?;
+        block!(self.spi.send(val)).map_err(Error::Spi)?;
+        // Flush the read buffer
+        let _ = block!(self.spi.read()).map_err(Error::Spi)?;
+        let _ = block!(self.spi.read()).map_err(Error::Spi)?;
         Ok(())
     }
 
-    fn set_antenna(&mut self, on: bool) -> Result<(), Error<E>> {
+    fn set_antenna(&mut self, on: bool) -> Result<(), Error<SE>> {
         let val = if on { 0x03 } else { 0x00 };
         self.write_reg(0x26, val)
     }
 
-    pub fn request(&mut self) -> Result<CardType, Error<E>> {
+    pub fn request(&mut self) -> Result<CardType, Error<SE>> {
         self.write_reg(BIT_FRAMING_REG, 0x07)?;
 
         let cmd = PICC_REQALL;
@@ -123,7 +137,7 @@ where
         }
     }
 
-    pub fn anticoll(&mut self) -> Result<[u8; 4], Error<E>> {
+    pub fn anticoll(&mut self) -> Result<[u8; 4], Error<SE>> {
         let mut uid = [0u8; 4];
 
         self.write_reg(BIT_FRAMING_REG, 0x00)?;
@@ -164,7 +178,7 @@ where
         key_type: KeyType,
         key: &[u8; 6],
         uid: &[u8; 4],
-    ) -> Result<(), Error<E>> {
+    ) -> Result<(), Error<SE>> {
         let cmd = match key_type {
             KeyType::KeyA => PICC_AUTHENT1A,
             KeyType::KeyB => PICC_AUTHENT1B,
@@ -200,7 +214,7 @@ where
         Ok(())
     }
 
-    pub fn read(&mut self, block: u8) -> Result<[u8; 16], Error<E>> {
+    pub fn read(&mut self, block: u8) -> Result<[u8; 16], Error<SE>> {
         let mut data = [0u8; 16];
 
         self.write_reg(FIFOLEVEL_REG, 0x80)?;
@@ -236,7 +250,7 @@ where
         Ok(data)
     }
 
-    pub fn write(&mut self, block: u8, data: &[u8; 16]) -> Result<(), Error<E>> {
+    pub fn write(&mut self, block: u8, data: &[u8; 16]) -> Result<(), Error<SE>> {
         self.write_reg(FIFOLEVEL_REG, 0x80)?;
         self.write_reg(COMMAND_REG, CMD_IDLE)?;
         self.write_reg(FIFO_DATA_REG, PICC_WRITE)?;
