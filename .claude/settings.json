@@ -9,7 +9,8 @@
       "Bash(grep:*)",
       "Bash(brew list:*)",
       "Bash(rust-objcopy:*)",
-      "Bash(cargo clean:*)"
+      "Bash(cargo clean:*)",
+      "Bash(rust-readobj:*)"
     ],
     "additionalDirectories": [
       "/Users/lishuang/workDir/rfid-stm32h750/docs"
