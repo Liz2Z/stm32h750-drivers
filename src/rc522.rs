@@ -1,0 +1,86 @@
+// src/rc522.rs
+
+use crate::types::{CardType, KeyType, Error};
+use embedded_hal::spi::SpiBus;
+use embedded_hal::digital::OutputPin;
+
+// RC522 寄存器地址
+const COMMAND_REG: u8 = 0x01 << 3;
+const COM_I_EN_REG: u8 = 0x02 << 3;
+const DIV_IRQ_REG: u8 = 0x03 << 3;
+const COM_IRQ_REG: u8 = 0x04 << 3;
+const ERROR_REG: u8 = 0x06 << 3;
+const FIFOLEVEL_REG: u8 = 0x0A << 3;
+const FIFO_DATA_REG: u8 = 0x09 << 3;
+const STATUS_REG: u8 = 0x07 << 3;
+const BIT_FRAMING_REG: u8 = 0x0D << 3;
+
+// RC522 命令
+const CMD_IDLE: u8 = 0x00;
+const CMD_TRANSCEIVE: u8 = 0x0C;
+const CMD_AUTHENT: u8 = 0x0E;
+const CMD_SOFT_RESET: u8 = 0x0F;
+
+// Mifare 命令
+const PICC_REQALL: u8 = 0x52;
+const PICC_ANTICOLL1: u8 = 0x93;
+const PICC_AUTHENT1A: u8 = 0x60;
+const PICC_AUTHENT1B: u8 = 0x61;
+const PICC_READ: u8 = 0x30;
+const PICC_WRITE: u8 = 0xA0;
+
+pub struct RC522<SPI, RST> {
+    spi: SPI,
+    rst: RST,
+}
+
+impl<SPI, E, RST> RC522<SPI, RST>
+where
+    SPI: SpiBus<Error = E>,
+    RST: OutputPin<Error = E>,
+{
+    pub fn new(mut spi: SPI, mut rst: RST) -> Result<Self, Error<E>> {
+        // 硬件复位
+        rst.set_low().map_err(Error::Spi)?;
+        cortex_m::asm::delay(10_000);
+        rst.set_high().map_err(Error::Spi)?;
+        cortex_m::asm::delay(100_000);
+
+        let mut rc522 = Self { spi, rst };
+
+        // 软复位
+        rc522.write_reg(COMMAND_REG, CMD_SOFT_RESET)?;
+
+        // 配置
+        rc522.write_reg(COM_I_EN_REG, 0x7F)?;
+        rc522.write_reg(DIV_IRQ_REG, 0x00)?;
+
+        // 开启天线
+        rc522.set_antenna(true)?;
+
+        Ok(rc522)
+    }
+
+    fn read_reg(&mut self, reg: u8) -> Result<u8, Error<E>> {
+        let addr = 0x80 | reg;
+        let mut tx = [addr, 0x00];
+        let mut rx = [0u8; 2];
+
+        self.spi.transfer(&mut rx, &tx).map_err(Error::Spi)?;
+        Ok(rx[1])
+    }
+
+    fn write_reg(&mut self, reg: u8, val: u8) -> Result<(), Error<E>> {
+        let addr = reg & 0x7F;
+        let tx = [addr, val];
+        let mut rx = [0u8; 2];
+
+        self.spi.transfer(&mut rx, &tx).map_err(Error::Spi)?;
+        Ok(())
+    }
+
+    fn set_antenna(&mut self, on: bool) -> Result<(), Error<E>> {
+        let val = if on { 0x03 } else { 0x00 };
+        self.write_reg(0x26, val)
+    }
+}
