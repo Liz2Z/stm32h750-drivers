@@ -199,4 +199,40 @@ where
 
         Ok(())
     }
+
+    pub fn read(&mut self, block: u8) -> Result<[u8; 16], Error<E>> {
+        let mut data = [0u8; 16];
+
+        self.write_reg(FIFOLEVEL_REG, 0x80)?;
+        self.write_reg(COMMAND_REG, CMD_IDLE)?;
+        self.write_reg(FIFO_DATA_REG, PICC_READ)?;
+        self.write_reg(FIFO_DATA_REG, block)?;
+
+        self.write_reg(COMMAND_REG, CMD_TRANSCEIVE)?;
+        self.write_reg(BIT_FRAMING_REG, 0x80)?;
+
+        let mut timeout = 5000;
+        while self.read_reg(COM_IRQ_REG)? & 0x01 == 0 {
+            timeout -= 1;
+            if timeout == 0 {
+                return Err(Error::Timeout);
+            }
+        }
+
+        let error = self.read_reg(ERROR_REG)?;
+        if error & 0x08 != 0 {
+            return Err(Error::Collision);
+        }
+
+        let n = self.read_reg(FIFOLEVEL_REG)?;
+        if n < 18 {
+            return Err(Error::NoCard);
+        }
+
+        for i in 0..16 {
+            data[i] = self.read_reg(FIFO_DATA_REG)?;
+        }
+
+        Ok(data)
+    }
 }
