@@ -122,4 +122,39 @@ where
             _ => Ok(CardType::Unknown),
         }
     }
+
+    pub fn anticoll(&mut self) -> Result<[u8; 4], Error<E>> {
+        let mut uid = [0u8; 4];
+
+        self.write_reg(BIT_FRAMING_REG, 0x00)?;
+        self.write_reg(FIFOLEVEL_REG, 0x80)?;
+
+        self.write_reg(FIFO_DATA_REG, PICC_ANTICOLL1)?;
+        self.write_reg(FIFO_DATA_REG, 0x20)?;
+
+        self.write_reg(COMMAND_REG, CMD_TRANSCEIVE)?;
+        self.write_reg(BIT_FRAMING_REG, 0x80)?;
+
+        let mut timeout = 1000;
+        while self.read_reg(COM_IRQ_REG)? & 0x01 == 0 {
+            timeout -= 1;
+            if timeout == 0 {
+                return Err(Error::Timeout);
+            }
+        }
+
+        let n = self.read_reg(FIFOLEVEL_REG)?;
+        if n != 5 {
+            return Err(Error::Collision);
+        }
+
+        for i in 0..5 {
+            let byte = self.read_reg(FIFO_DATA_REG)?;
+            if i < 4 {
+                uid[i] = byte;
+            }
+        }
+
+        Ok(uid)
+    }
 }
