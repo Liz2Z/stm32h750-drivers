@@ -5,6 +5,9 @@ use panic_halt as _;
 use cortex_m_rt::entry;
 use stm32h7xx_hal::{pac, prelude::*, spi};
 
+mod rc522;
+mod types;
+
 #[entry]
 fn main() -> ! {
     let dp = pac::Peripherals::take().unwrap();
