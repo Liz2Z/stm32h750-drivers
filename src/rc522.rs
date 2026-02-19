@@ -302,4 +302,47 @@ where
 
         Ok(())
     }
+
+    pub fn select_card(&mut self, uid: &[u8; 4]) -> Result<(), Error<SE>> {
+        self.write_reg(FIFOLEVEL_REG, 0x80)?;
+        self.write_reg(COMMAND_REG, CMD_IDLE)?;
+        self.write_reg(FIFO_DATA_REG, 0x93)?;
+        self.write_reg(FIFO_DATA_REG, 0x70)?;
+
+        for &b in uid.iter() {
+            self.write_reg(FIFO_DATA_REG, b)?;
+        }
+
+        self.write_reg(FIFO_DATA_REG, 0x00)?;
+        self.write_reg(FIFO_DATA_REG, 0x00)?;
+
+        self.write_reg(COMMAND_REG, CMD_TRANSCEIVE)?;
+        self.write_reg(BIT_FRAMING_REG, 0x80)?;
+
+        let mut timeout = 5000;
+        while self.read_reg(COM_IRQ_REG)? & 0x01 == 0 {
+            timeout -= 1;
+            if timeout == 0 {
+                return Err(Error::Timeout);
+            }
+        }
+
+        let n = self.read_reg(FIFOLEVEL_REG)?;
+        if n < 2 {
+            return Err(Error::NoCard);
+        }
+
+        let byte1 = self.read_reg(FIFO_DATA_REG)?;
+        let _byte2 = self.read_reg(FIFO_DATA_REG)?;
+
+        if byte1 != uid[0] {
+            return Err(Error::Collision);
+        }
+
+        Ok(())
+    }
+
+    pub fn get_version(&mut self) -> Result<u8, Error<SE>> {
+        self.read_reg(0x37)
+    }
 }
