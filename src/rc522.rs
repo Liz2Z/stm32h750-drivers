@@ -83,4 +83,43 @@ where
         let val = if on { 0x03 } else { 0x00 };
         self.write_reg(0x26, val)
     }
+
+    pub fn request(&mut self) -> Result<CardType, Error<E>> {
+        self.write_reg(BIT_FRAMING_REG, 0x07)?;
+
+        let cmd = PICC_REQALL;
+        self.write_reg(COMMAND_REG, CMD_IDLE)?;
+        self.write_reg(FIFO_DATA_REG, cmd)?;
+        self.write_reg(COMMAND_REG, CMD_TRANSCEIVE)?;
+        self.write_reg(BIT_FRAMING_REG, 0x80 | 0x07)?;
+
+        // 等待完成
+        let mut timeout = 1000;
+        while self.read_reg(COM_IRQ_REG)? & 0x01 == 0 {
+            timeout -= 1;
+            if timeout == 0 {
+                return Err(Error::Timeout);
+            }
+        }
+
+        let status = self.read_reg(ERROR_REG)?;
+        if status & 0x08 != 0 {
+            return Err(Error::Collision);
+        }
+
+        let n = self.read_reg(FIFOLEVEL_REG)?;
+        if n != 2 {
+            return Err(Error::NoCard);
+        }
+
+        let byte1 = self.read_reg(FIFO_DATA_REG)?;
+        let byte2 = self.read_reg(FIFO_DATA_REG)?;
+
+        match (byte1, byte2) {
+            (0x02, 0x00) => Ok(CardType::Mifare1K),
+            (0x04, 0x00) => Ok(CardType::MifareUltralight),
+            (0x02, 0x04) => Ok(CardType::Mifare4K),
+            _ => Ok(CardType::Unknown),
+        }
+    }
 }
