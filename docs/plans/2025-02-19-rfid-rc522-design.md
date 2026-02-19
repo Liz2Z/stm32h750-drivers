@@ -1,7 +1,7 @@
 # RFID-RC522 STM32H750 驱动设计
 
 **日期**: 2025-02-19
-**目标**: 使用 Rust bare-metal 在 STM32H750 上实现完整的 RFID-RC522 读写功能
+**目标**: 使用 Rust + stm32h7xx-hal 在 STM32H750 上实现完整的 RFID-RC522 读写功能
 
 ## 1. 项目结构
 
@@ -14,11 +14,12 @@ rfid-stm32h750/
 │   └── config.toml         # Cargo 配置（目标选择）
 ├── src/
 │   ├── main.rs             # 主程序入口、初始化、应用逻辑
-│   ├── spi_hal.rs          # SPI HAL 层（封装 stm32h7 PAC）
-│   ├── rc522.rs            # RC522 驱动模块
+│   ├── rc522.rs            # RC522 驱动模块（使用 embedded-hal SPI trait）
 │   └── types.rs            # 共享类型定义
 └── Makefile                # 构建和烧录命令
 ```
+
+**架构变更**: 使用 `stm32h7xx-hal` 替代 bare-metal PAC，简化 GPIO 和 SPI 配置。
 
 ## 2. 硬件引脚分配
 
@@ -92,9 +93,12 @@ fn main() -> ! {
 
 ```toml
 [dependencies]
-stm32h7 = { version = "0.16", features = ["stm32h750v", "rt"] }
+stm32h7xx-hal = { version = "0.16", features = ["stm32h750v", "rt", "spi"] }
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7"
 embedded-hal = "1.0"
 panic-halt = "1.0"
+nb = "1.0"
 ```
 
 ## 6. 调试计划

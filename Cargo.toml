@@ -4,12 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-stm32h7 = { version = "0.16", features = ["stm32h750", "rt"] }
+stm32h7xx-hal = { version = "0.16", features = ["stm32h750v", "rt", "xspi"] }
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7"
 embedded-hal = "1.0"
 panic-halt = "1.0"
 nb = "1.0"
-cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
-cortex-m-rt = "0.7"
 
 [profile.dev]
 opt-level = "s"
