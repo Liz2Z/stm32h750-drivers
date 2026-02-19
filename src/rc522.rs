@@ -157,4 +157,46 @@ where
 
         Ok(uid)
     }
+
+    pub fn authenticate(
+        &mut self,
+        block: u8,
+        key_type: KeyType,
+        key: &[u8; 6],
+        uid: &[u8; 4],
+    ) -> Result<(), Error<E>> {
+        let cmd = match key_type {
+            KeyType::KeyA => PICC_AUTHENT1A,
+            KeyType::KeyB => PICC_AUTHENT1B,
+        };
+
+        self.write_reg(FIFOLEVEL_REG, 0x80)?;
+        self.write_reg(FIFO_DATA_REG, cmd)?;
+        self.write_reg(FIFO_DATA_REG, block)?;
+
+        for &b in key.iter() {
+            self.write_reg(FIFO_DATA_REG, b)?;
+        }
+        for &b in uid.iter() {
+            self.write_reg(FIFO_DATA_REG, b)?;
+        }
+
+        self.write_reg(COMMAND_REG, CMD_AUTHENT)?;
+        self.write_reg(BIT_FRAMING_REG, 0x00)?;
+
+        let mut timeout = 5000;
+        while self.read_reg(COM_IRQ_REG)? & 0x01 == 0 {
+            timeout -= 1;
+            if timeout == 0 {
+                return Err(Error::Timeout);
+            }
+        }
+
+        let status = self.read_reg(STATUS_REG)?;
+        if status & 0x08 != 0 {
+            return Err(Error::Timeout);
+        }
+
+        Ok(())
+    }
 }
