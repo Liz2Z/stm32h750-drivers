@@ -1,5 +1,16 @@
 {
   "permissions": {
+    "allow": [
+      "Bash(cargo build:*)",
+      "Read(//Users/lishuang/.cargo/registry/src/**)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(cargo tree:*)",
+      "Bash(grep:*)",
+      "Bash(brew list:*)",
+      "Bash(rust-objcopy:*)",
+      "Bash(cargo clean:*)"
+    ],
     "additionalDirectories": [
       "/Users/lishuang/workDir/rfid-stm32h750/docs"
     ]
