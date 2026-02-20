@@ -10,7 +10,10 @@
       "Bash(brew list:*)",
       "Bash(rust-objcopy:*)",
       "Bash(cargo clean:*)",
-      "Bash(rust-readobj:*)"
+      "Bash(rust-readobj:*)",
+      "Bash(make:*)",
+      "Bash(make flash-openocd:*)",
+      "Bash(cargo check:*)"
     ],
     "additionalDirectories": [
       "/Users/lishuang/workDir/rfid-stm32h750/docs"

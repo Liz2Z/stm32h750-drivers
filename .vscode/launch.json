@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "STM32 Debug",
+      "cwd": "${workspaceFolder}",
+      "executable": "./target/thumbv7em-none-eabihf/release/rfid-stm32h750",
+      "request": "launch",
+      "type": "cortex-debug",
+      "runToEntryPoint": "main",
+      "servertype": "openocd",
+      "device": "STM32H750VB",
+      "configFiles": ["interface/stlink.cfg", "target/stm32h7x.cfg"],
+      "showDevDebugOutput": "raw"
+    }
+  ]
+}
