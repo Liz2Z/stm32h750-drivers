@@ -16,7 +16,8 @@
       "Bash(cargo check:*)"
     ],
     "additionalDirectories": [
-      "/Users/lishuang/workDir/rfid-stm32h750/docs"
+      "/Users/lishuang/workDir/rfid-stm32h750/docs",
+      "/Users/lishuang/workDir/stm32h750-display/docs/plans"
     ]
   }
 }

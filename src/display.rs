@@ -1,5 +1,5 @@
 //! ILI9341 屏幕驱动模块
-//! 使用软件 SPI 与 RC522 隔离，避免冲突
+//! 使用硬件 SPI2 实现高速传输
 
 use embedded_graphics::{
     draw_target::DrawTarget,
@@ -8,40 +8,9 @@ use embedded_graphics::{
     prelude::*,
     primitives::Rectangle,
 };
-use embedded_hal::digital::v2::{InputPin, OutputPin};
-
-/// 包装类型来适配 v2 trait
-pub struct PinWrapper<P>(P);
-
-impl<P> PinWrapper<P> {
-    pub fn new(pin: P) -> Self {
-        Self(pin)
-    }
-}
-
-impl<P: OutputPin> OutputPin for PinWrapper<P> {
-    type Error = P::Error;
-
-    fn set_low(&mut self) -> Result<(), Self::Error> {
-        self.0.set_low()
-    }
-
-    fn set_high(&mut self) -> Result<(), Self::Error> {
-        self.0.set_high()
-    }
-}
-
-impl<P: InputPin> InputPin for PinWrapper<P> {
-    type Error = P::Error;
-
-    fn is_high(&self) -> Result<bool, Self::Error> {
-        self.0.is_high()
-    }
-
-    fn is_low(&self) -> Result<bool, Self::Error> {
-        self.0.is_low()
-    }
-}
+use embedded_hal::blocking::spi::Transfer;
+use embedded_hal::digital::v2::OutputPin;
+use nb::block;
 
 /// 屏幕分辨率
 pub const DISPLAY_WIDTH: usize = 240;
@@ -90,179 +59,113 @@ mod commands {
     pub const GMCTRN1: u8 = 0xE1;
 }
 
-/// 显示方向
-#[derive(Clone, Copy)]
-pub enum Orientation {
-    Portrait = 0x00,
-    Landscape = 0x60,
-    PortraitSwapped = 0xC0,
-    LandscapeSwapped = 0xA0,
-}
-
-/// 软件 SPI 结构体（用于屏幕）
-pub struct DisplaySpi<SCK, MOSI, MISO, CS, DC> {
-    sck: SCK,
-    mosi: MOSI,
-    miso: MISO,
+/// 硬件 SPI 显示驱动
+pub struct DisplaySpi<SPI, CS, DC> {
+    spi: SPI,
     cs: CS,
     dc: DC,
 }
 
-impl<SCK, MOSI, MISO, CS, DC, E> DisplaySpi<SCK, MOSI, MISO, CS, DC>
+impl<SPI, CS, DC> DisplaySpi<SPI, CS, DC>
 where
-    SCK: OutputPin<Error = E>,
-    MOSI: OutputPin<Error = E>,
-    MISO: InputPin<Error = E>,
-    CS: OutputPin<Error = E>,
-    DC: OutputPin<Error = E>,
-    E: core::fmt::Debug,
+    SPI: Transfer<u8>,
+    CS: OutputPin,
+    DC: OutputPin,
 {
-    pub fn new(sck: SCK, mosi: MOSI, miso: MISO, cs: CS, dc: DC) -> Self {
-        Self {
-            sck,
-            mosi,
-            miso,
-            cs,
-            dc,
-        }
+    pub fn new(spi: SPI, cs: CS, dc: DC) -> Self {
+        Self { spi, cs, dc }
     }
 
-    /// 延时函数 - 最小化延时
-    fn delay_ns(&self, _ns: u32) {
-        cortex_m::asm::nop();
-    }
-
-    /// 传输单个字节 - 极速版本
+    /// 传输单个字节（带延时）
     fn transfer_byte(&mut self, data: u8) -> u8 {
-        let mut received = 0u8;
-
-        // 展开循环以减少开销
-        let bits = [
-            (data >> 7) & 1,
-            (data >> 6) & 1,
-            (data >> 5) & 1,
-            (data >> 4) & 1,
-            (data >> 3) & 1,
-            (data >> 2) & 1,
-            (data >> 1) & 1,
-            (data >> 0) & 1,
-        ];
-
-        for i in 0..8 {
-            if bits[i] == 1 {
-                let _ = self.mosi.set_high();
-            } else {
-                let _ = self.mosi.set_low();
-            }
-
-            let _ = self.sck.set_high();
-
-            if self.miso.is_high().unwrap_or(false) {
-                received |= 1 << (7 - i);
-            }
-
-            let _ = self.sck.set_low();
+        let mut buf = [data];
+        self.spi.transfer(&mut buf).ok();
+        // 添加短暂延时让信号稳定
+        for _ in 0..10 {
+            cortex_m::asm::nop();
         }
+        buf[0]
+    }
 
-        received
+    /// 传输多个字节
+    fn transfer_bytes(&mut self, data: &mut [u8]) {
+        self.spi.transfer(data).ok();
     }
 
     /// 写命令
     fn write_command(&mut self, cmd: u8) {
-        // 拉高 CS，准备新的传输
-        let _ = self.cs.set_high();
-        self.delay_ns(1);
-
-        let _ = self.cs.set_low();
-        let _ = self.dc.set_low(); // DC = 0 表示命令
-        self.delay_ns(1);
-
+        self.cs.set_low().ok();
+        self.dc.set_low().ok();
         let _ = self.transfer_byte(cmd);
-
-        let _ = self.cs.set_high();
-        self.delay_ns(1);
+        self.cs.set_high().ok();
     }
 
-    /// 写数据（跟随命令）
+    /// 写数据
     fn write_data(&mut self, data: u8) {
-        // 保持 CS 低电平，只切换 DC
-        let _ = self.dc.set_high(); // DC = 1 表示数据
-        self.delay_ns(1);
-
+        self.cs.set_low().ok();
+        self.dc.set_high().ok();
         let _ = self.transfer_byte(data);
-
-        // 数据传输完成后拉高 CS
-        let _ = self.cs.set_high();
-        self.delay_ns(1);
+        self.cs.set_high().ok();
     }
 
-    /// 写多个数据字节（跟随命令）
+    /// 写多个数据字节（保持 CS 低）
     fn write_data_bytes(&mut self, data: &[u8]) {
-        let _ = self.dc.set_high();
-        self.delay_ns(1);
-
+        self.cs.set_low().ok();
+        self.dc.set_high().ok();
         for &byte in data {
             let _ = self.transfer_byte(byte);
         }
-
-        let _ = self.cs.set_high();
-        self.delay_ns(1);
+        self.cs.set_high().ok();
     }
 
-    /// 写命令后紧跟数据（保持 CS 低）
+    /// 写命令后紧跟数据
     fn write_cmd_data(&mut self, cmd: u8, data: u8) {
-        // 发送命令
-        let _ = self.cs.set_high();
-        self.delay_ns(1);
-        let _ = self.cs.set_low();
-        let _ = self.dc.set_low();
-        self.delay_ns(1);
+        self.cs.set_low().ok();
+        self.dc.set_low().ok();
         let _ = self.transfer_byte(cmd);
-
-        // 切换为数据模式
-        let _ = self.dc.set_high();
-        self.delay_ns(1);
+        self.dc.set_high().ok();
         let _ = self.transfer_byte(data);
-
-        let _ = self.cs.set_high();
-        self.delay_ns(1);
+        self.cs.set_high().ok();
     }
 
-    /// 软件复位
-    fn soft_reset(&mut self) {
-        self.write_command(commands::SWRESET);
-        for _ in 0..500000 { cortex_m::asm::nop(); }
-    }
+    /// 初始化屏幕（带串口调试）
+    pub fn init(&mut self, tx: &mut impl embedded_hal::serial::Write<u8>) {
+        // 写入调试信息
+        let mut write_str = |s: &str| {
+            for b in s.bytes() {
+                let _ = block!(tx.write(b));
+            }
+        };
 
-    /// 初始化屏幕
-    pub fn init(&mut self) {
+        write_str("[Display] Start init...\r\n");
+
         // 确保 CS 和 DC 为高电平
         let _ = self.cs.set_high();
         let _ = self.dc.set_high();
 
-        // 软件复位
+        write_str("[Display] Software reset...\r\n");
         self.write_command(commands::SWRESET);
-        // 减少复位延时到 50ms
-        for _ in 0..500000 { cortex_m::asm::nop(); }
+        for _ in 0..500000 {
+            cortex_m::asm::nop();
+        }
 
-        // 退出睡眠模式
+        write_str("[Display] Exit sleep mode...\r\n");
         self.write_command(commands::SLPOUT);
-        // 减少延时到 50ms
-        for _ in 0..500000 { cortex_m::asm::nop(); }
+        for _ in 0..500000 {
+            cortex_m::asm::nop();
+        }
 
-        // 设置颜色格式 (16位 RGB565)
+        write_str("[Display] Set color format (16-bit RGB565)...\r\n");
         self.write_cmd_data(commands::COLMOD, 0x55);
 
-        // 设置扫描方向 - 使用 0x48 表示行/列交换，以便正确显示
-        // bit 3: BGR=1 (BGR 顺序)
-        // bit 6: MV=1 (行/列交换，横屏)
+        write_str("[Display] Set memory access control...\r\n");
         self.write_cmd_data(commands::MADCTL, 0x48);
 
-        // 设置帧率控制
+        write_str("[Display] Set frame rate control...\r\n");
         self.write_cmd_data(commands::FRMCTR1, 0x00);
-        self.write_data(0x1B); // 继续写数据
+        self.write_data(0x1B);
 
-        // 电源控制
+        write_str("[Display] Set power control...\r\n");
         self.write_command(commands::PWCTR1);
         self.write_data(0x23);
         self.write_data(0x10);
@@ -272,64 +175,54 @@ where
         self.write_cmd_data(commands::VMCTR1, 0x3E);
         self.write_data(0x28);
 
-        // 设置显示正常模式（不反转）
+        write_str("[Display] Set inversion off...\r\n");
         self.write_command(commands::INVOFF);
 
-        // Gamma 校正
+        write_str("[Display] Set Gamma correction...\r\n");
         self.write_command(commands::GMCTRP1);
         self.write_data_bytes(&[
-            0x0F, 0x31, 0x2B, 0x0C, 0x0E, 0x08, 0x4E, 0xF1,
-            0x37, 0x07, 0x10, 0x03, 0x0E, 0x09, 0x00,
+            0x0F, 0x31, 0x2B, 0x0C, 0x0E, 0x08, 0x4E, 0xF1, 0x37, 0x07, 0x10, 0x03, 0x0E, 0x09,
+            0x00,
         ]);
 
         self.write_command(commands::GMCTRN1);
         self.write_data_bytes(&[
-            0x00, 0x0E, 0x14, 0x03, 0x11, 0x07, 0x31, 0xC1,
-            0x48, 0x08, 0x0F, 0x0C, 0x31, 0x36, 0x0F,
+            0x00, 0x0E, 0x14, 0x03, 0x11, 0x07, 0x31, 0xC1, 0x48, 0x08, 0x0F, 0x0C, 0x31, 0x36,
+            0x0F,
         ]);
 
-        // 打开显示
+        write_str("[Display] Turn on display...\r\n");
         self.write_command(commands::DISPON);
-        // 短暂延时
-        for _ in 0..100000 { cortex_m::asm::nop(); }
+        for _ in 0..100000 {
+            cortex_m::asm::nop();
+        }
+
+        write_str("[Display] Init complete!\r\n");
     }
 
     /// 设置绘图区域
     fn set_address_window(&mut self, x0: u16, y0: u16, x1: u16, y1: u16) {
-        // 设置列地址 (CASET) - 保持 CS 低电平传输所有参数
-        let _ = self.cs.set_high();
-        self.delay_ns(1);
+        // 设置列地址 (CASET)
         let _ = self.cs.set_low();
         let _ = self.dc.set_low();
-        self.delay_ns(1);
         let _ = self.transfer_byte(commands::CASET);
-
-        // 切换到数据模式，发送 4 个参数
         let _ = self.dc.set_high();
-        self.delay_ns(1);
         let _ = self.transfer_byte((x0 >> 8) as u8);
         let _ = self.transfer_byte((x0 & 0xFF) as u8);
         let _ = self.transfer_byte((x1 >> 8) as u8);
         let _ = self.transfer_byte((x1 & 0xFF) as u8);
         let _ = self.cs.set_high();
 
-        // 设置页地址 (PASET) - 保持 CS 低电平传输所有参数
-        let _ = self.cs.set_high();
-        self.delay_ns(1);
+        // 设置页地址 (PASET)
         let _ = self.cs.set_low();
         let _ = self.dc.set_low();
-        self.delay_ns(1);
         let _ = self.transfer_byte(commands::PASET);
-
-        // 切换到数据模式，发送 4 个参数
         let _ = self.dc.set_high();
-        self.delay_ns(1);
         let _ = self.transfer_byte((y0 >> 8) as u8);
         let _ = self.transfer_byte((y0 & 0xFF) as u8);
         let _ = self.transfer_byte((y1 >> 8) as u8);
         let _ = self.transfer_byte((y1 & 0xFF) as u8);
         let _ = self.cs.set_high();
-        self.delay_ns(1);
     }
 
     /// 填充整个屏幕
@@ -354,7 +247,6 @@ where
 
         let _ = self.cs.set_low();
         let _ = self.dc.set_high();
-        self.delay_ns(1);
 
         for _ in 0..num_pixels {
             let _ = self.transfer_byte(high_byte);
@@ -365,14 +257,11 @@ where
     }
 }
 
-impl<SCK, MOSI, MISO, CS, DC, E> DrawTarget for DisplaySpi<SCK, MOSI, MISO, CS, DC>
+impl<SPI, CS, DC> DrawTarget for DisplaySpi<SPI, CS, DC>
 where
-    SCK: OutputPin<Error = E>,
-    MOSI: OutputPin<Error = E>,
-    MISO: InputPin<Error = E>,
-    CS: OutputPin<Error = E>,
-    DC: OutputPin<Error = E>,
-    E: core::fmt::Debug,
+    SPI: Transfer<u8>,
+    CS: OutputPin,
+    DC: OutputPin,
 {
     type Color = Rgb565;
     type Error = core::convert::Infallible;
@@ -396,11 +285,8 @@ where
 
                 let _ = self.cs.set_low();
                 let _ = self.dc.set_high();
-                self.delay_ns(10);
-
                 let _ = self.transfer_byte(high_byte);
                 let _ = self.transfer_byte(low_byte);
-
                 let _ = self.cs.set_high();
             }
         }
@@ -431,7 +317,6 @@ where
 
         let _ = self.cs.set_low();
         let _ = self.dc.set_high();
-        self.delay_ns(10);
 
         for color in colors {
             let pixel_color = color.into_storage();
@@ -471,14 +356,11 @@ where
     }
 }
 
-impl<SCK, MOSI, MISO, CS, DC, E> OriginDimensions for DisplaySpi<SCK, MOSI, MISO, CS, DC>
+impl<SPI, CS, DC> OriginDimensions for DisplaySpi<SPI, CS, DC>
 where
-    SCK: OutputPin<Error = E>,
-    MOSI: OutputPin<Error = E>,
-    MISO: InputPin<Error = E>,
-    CS: OutputPin<Error = E>,
-    DC: OutputPin<Error = E>,
-    E: core::fmt::Debug,
+    SPI: Transfer<u8>,
+    CS: OutputPin,
+    DC: OutputPin,
 {
     fn size(&self) -> Size {
         Size::new(DISPLAY_WIDTH as u32, DISPLAY_HEIGHT as u32)
