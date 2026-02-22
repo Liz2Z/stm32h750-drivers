@@ -11,7 +11,12 @@ use stm32h7xx_hal::prelude::*;
 use stm32h7xx_hal::spi;
 
 use display::DisplaySpi;
-use embedded_graphics::{pixelcolor::Rgb565, prelude::*};
+use embedded_graphics::{
+    pixelcolor::Rgb565,
+    prelude::*,
+    mono_font::{ascii::FONT_10X20, MonoTextStyle},
+    text::Text,
+};
 
 // 延时函数
 fn delay_ms(ms: u32) {
@@ -83,8 +88,8 @@ fn main() -> ! {
     // 初始化 SPI2 - ILI9341 通常使用 Mode 3 更稳定
     let spi = dp.SPI2.spi(
         (disp_sck, disp_miso, disp_mosi),
-        spi::MODE_3,  // CPOL=1, CPHA=1
-        1.MHz(),
+        spi::MODE_3, // CPOL=1, CPHA=1
+        48.MHz(),
         ccdr.peripheral.SPI2,
         &ccdr.clocks,
     );
@@ -131,6 +136,11 @@ fn main() -> ! {
     // 先清屏一次
     display.clear(Rgb565::BLACK).unwrap();
 
+    // 在屏幕中央绘制 "Hello World"
+    let text_style = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
+    let text = Text::new("Hello World!", Point::new(40, 150), text_style);
+    text.draw(&mut display).unwrap();
+
     // 主循环 - 弹跳方块动画
     loop {
         // 清除上一帧的方块（用黑色覆盖）
@@ -157,17 +167,17 @@ fn main() -> ! {
         // 绘制新位置的方块
         display.fill_rect(x as u16, y as u16, box_size, box_size, colors[color_idx]);
 
-        // 每 60 帧输出一次状态
-        frame_count += 1;
-        if frame_count % 60 == 0 {
-            write_str!(tx, "Frame: ");
-            let c = b'0' + (frame_count / 60 % 10) as u8;
-            let _ = block!(tx.write(c));
-            write_str!(tx, "\r\n");
-        }
+        // // 每 60 帧输出一次状态
+        // frame_count += 1;
+        // if frame_count % 60 == 0 {
+        //     write_str!(tx, "Frame: ");
+        //     let c = b'0' + (frame_count / 60 % 10) as u8;
+        //     let _ = block!(tx.write(c));
+        //     write_str!(tx, "\r\n");
+        // }
 
         // LED 慢闪表示运行中
-        let _ = led.toggle();
+        // let _ = led.toggle();
         delay_ms(16); // 约 60fps
     }
 }
