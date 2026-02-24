@@ -2,6 +2,7 @@
 #![no_main]
 
 mod display;
+mod ui;
 
 use cortex_m_rt::entry;
 use nb::block;
@@ -14,9 +15,9 @@ use display::DisplaySpi;
 use embedded_graphics::{
     pixelcolor::Rgb565,
     prelude::*,
-    mono_font::{ascii::FONT_10X20, MonoTextStyle},
-    text::Text,
 };
+
+use ui::{Button, Label, ProgressBar, Screen, Theme};
 
 // 延时函数
 fn delay_ms(ms: u32) {
@@ -53,13 +54,7 @@ fn main() -> ! {
     let gpiob = dp.GPIOB.split(ccdr.peripheral.GPIOB);
     let mut led = gpioa.pa1.into_push_pull_output();
 
-    // 屏幕引脚配置（根据开发板实际连接）
-    // PB0 = BLK (背光)
-    // PB1 = RS/D/C
-    // PB12 = CS (软件控制)
-    // PB13 = SCK (SPI2 AF5)
-    // PB14 = MISO (SPI2 AF5)
-    // PB15 = MOSI (SPI2 AF5)
+    // 屏幕引脚配置
     let mut disp_blk = gpiob.pb0.into_push_pull_output();
     let disp_dc = gpiob.pb1.into_push_pull_output();
     let disp_cs = gpiob.pb12.into_push_pull_output();
@@ -85,10 +80,10 @@ fn main() -> ! {
         .unwrap();
     let (mut tx, _rx) = serial.split();
 
-    // 初始化 SPI2 - ILI9341 通常使用 Mode 3 更稳定
+    // 初始化 SPI2
     let spi = dp.SPI2.spi(
         (disp_sck, disp_miso, disp_mosi),
-        spi::MODE_3, // CPOL=1, CPHA=1
+        spi::MODE_3,
         48.MHz(),
         ccdr.peripheral.SPI2,
         &ccdr.clocks,
@@ -101,83 +96,78 @@ fn main() -> ! {
     display.init(&mut tx);
     write_str!(tx, "Display init complete!\r\n");
 
+    // 清屏
+    display.clear(Rgb565::BLACK).unwrap();
+
     // LED 快闪 5 次表示进入主循环
     for _ in 0..5 {
         let _ = led.toggle();
-        delay_ms(50);
+        delay_ms(100);
     }
 
-    // 串口欢迎消息
-    write_str!(tx, "\r\n=== STM32H750 Display Animation ===\r\n");
+    write_str!(tx, "\r\n=== STM32H750 UI Demo ===\r\n");
+    write_str!(tx, "Creating UI screen...\r\n");
 
-    // 动画参数
-    let mut x: i32 = 0;
-    let mut y: i32 = 0;
-    let mut dx: i32 = 4;
-    let mut dy: i32 = 3;
-    let box_size: u16 = 40;
-    let max_x = 240 - box_size as i32;
-    let max_y = 320 - box_size as i32;
+    // 创建 UI 屏幕（240x320）
+    let screen = Screen::new(240, 320).with_theme(Theme::dark());
 
-    // 颜色数组
-    let colors = [
-        Rgb565::RED,
-        Rgb565::GREEN,
-        Rgb565::BLUE,
-        Rgb565::YELLOW,
-        Rgb565::CYAN,
-        Rgb565::MAGENTA,
-    ];
-    let mut color_idx = 0;
+    // 添加标题标签
+    let title = Label::new(120, 20, "UI Demo").centered();
+    let mut screen = screen;
+    let _ = screen.add_label(title);
+
+    // 添加按钮
+    let btn1 = Button::new(1, 20, 60, 90, 40, "Button 1");
+    let _ = screen.add_button(btn1);
+
+    let btn2 = Button::new(2, 130, 60, 90, 40, "Button 2");
+    let _ = screen.add_button(btn2);
+
+    // 添加进度条
+    let progress = ProgressBar::new(1, 20, 130, 200, 25)
+        .with_range(0, 100);
+    let _ = screen.add_progress(progress);
+
+    // 添加状态标签
+    let status = Label::new(120, 180, "Status: Ready").centered();
+    let _ = screen.add_label(status);
+
+    write_str!(tx, "UI screen created!\r\n");
+
+    // 初始绘制
+    screen.draw(&mut display).unwrap();
+
+    write_str!(tx, "Starting main loop...\r\n");
+
+    // 动画状态
+    let mut anim_value: i32 = 0;
+    let mut anim_direction: i32 = 1;
     let mut frame_count: u32 = 0;
 
-    write_str!(tx, "Starting animation loop...\r\n");
-
-    // 先清屏一次
-    display.clear(Rgb565::BLACK).unwrap();
-
-    // 在屏幕中央绘制 "Hello World"
-    let text_style = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
-    let text = Text::new("Hello World!", Point::new(40, 150), text_style);
-    text.draw(&mut display).unwrap();
-
-    // 主循环 - 弹跳方块动画
+    // 主循环
     loop {
-        // 清除上一帧的方块（用黑色覆盖）
-        display.fill_rect(x as u16, y as u16, box_size, box_size, Rgb565::BLACK);
-
-        // 更新位置
-        x += dx;
-        y += dy;
-
-        // 碰撞检测 - X 方向
-        if x <= 0 || x >= max_x {
-            dx = -dx;
-            x = x.clamp(0, max_x);
-            color_idx = (color_idx + 1) % colors.len();
+        // 更新进度条动画
+        anim_value += anim_direction * 2;
+        if anim_value >= 100 {
+            anim_value = 100;
+            anim_direction = -1;
+        } else if anim_value <= 0 {
+            anim_value = 0;
+            anim_direction = 1;
         }
 
-        // 碰撞检测 - Y 方向
-        if y <= 0 || y >= max_y {
-            dy = -dy;
-            y = y.clamp(0, max_y);
-            color_idx = (color_idx + 1) % colors.len();
-        }
+        // 模拟更新进度条值
+        // 注意：这里需要修改 Screen 的实现来支持修改控件
+        // 暂时重新绘制整个屏幕
+        screen.draw(&mut display).unwrap();
 
-        // 绘制新位置的方块
-        display.fill_rect(x as u16, y as u16, box_size, box_size, colors[color_idx]);
-
-        // // 每 60 帧输出一次状态
-        // frame_count += 1;
-        // if frame_count % 60 == 0 {
-        //     write_str!(tx, "Frame: ");
-        //     let c = b'0' + (frame_count / 60 % 10) as u8;
-        //     let _ = block!(tx.write(c));
-        //     write_str!(tx, "\r\n");
-        // }
+        frame_count += 1;
 
         // LED 慢闪表示运行中
-        // let _ = led.toggle();
+        if frame_count % 60 == 0 {
+            let _ = led.toggle();
+        }
+
         delay_ms(16); // 约 60fps
     }
 }
