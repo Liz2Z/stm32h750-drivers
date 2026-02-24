@@ -320,39 +320,22 @@ where
         self.spi.transfer(data).ok();  // 批量传输整个缓冲区
     }
 
-    /// 向屏幕发送命令
+    /// 向屏幕发送命令（公共接口，供 LVGL 使用）
     ///
     /// # 参数
     /// - `cmd`: 命令代码（如 SWRESET、CASET、RAMWR 等）
-    ///
-    /// # 通信时序
-    /// ```text
-    /// CS:  ┐       ┌
-    ///      └───────┘   (拉低选中，完成后拉高)
-    /// DC:  ┐       ┌
-    ///      └───────┘   (命令模式，保持低电平)
-    /// MOSI: [CMD ]
-    /// ```
-    fn write_command(&mut self, cmd: u8) {
+    pub fn write_command(&mut self, cmd: u8) {
         self.cs.set_low().ok();   // 拉低 CS，选中屏幕
         self.dc.set_low().ok();   // 拉低 DC，表示发送的是命令
         let _ = self.transfer_byte(cmd);  // 发送命令字节
         self.cs.set_high().ok();  // 拉高 CS，结束通信
     }
 
-    /// 向屏幕发送单个数据字节
+    /// 向屏幕发送单个数据字节（公共接口，供 LVGL 使用）
     ///
     /// # 参数
     /// - `data`: 数据字节（如参数值、颜色分量等）
-    ///
-    /// # 通信时序
-    /// ```text
-    /// CS:  ┐       ┌
-    ///      └───────┘
-    /// DC:  ┌───────┐   (数据模式，保持高电平)
-    /// MOSI: [DATA]
-    /// ```
-    fn write_data(&mut self, data: u8) {
+    pub fn write_data(&mut self, data: u8) {
         self.cs.set_low().ok();   // 拉低 CS，选中屏幕
         self.dc.set_high().ok();  // 拉高 DC，表示发送的是数据
         let _ = self.transfer_byte(data);  // 发送数据字节
@@ -394,7 +377,57 @@ where
         self.cs.set_high().ok();  // 拉高 CS，结束通信
     }
 
-    /// 初始化 ILI9341 屏幕
+    /// 向屏幕发送命令（公共版本，供外部模块使用）
+    ///
+    /// # 参数
+    /// - `cmd`: 命令代码（如 SWRESET、CASET、RAMWR 等）
+    pub fn send_command(&mut self, cmd: u8) {
+        self.write_command(cmd);
+    }
+
+    /// 向屏幕发送单个数据字节（公共版本）
+    ///
+    /// # 参数
+    /// - `data`: 数据字节
+    pub fn send_data(&mut self, data: u8) {
+        self.write_data(data);
+    }
+
+    /// 批量发送像素数据到屏幕（用于 LVGL 等图形库）
+    ///
+    /// # 参数
+    /// - `x`: 起始 X 坐标
+    /// - `y`: 起始 Y 坐标
+    /// - `w`: 宽度
+    /// - `h`: 高度
+    /// - `pixels`: RGB565 像素数据（每个像素 2 字节，高位在前）
+    pub fn write_pixels_raw(
+        &mut self,
+        x: u16,
+        y: u16,
+        w: u16,
+        h: u16,
+        pixels: &[u8],
+    ) {
+        let x1 = (x + w - 1).min((DISPLAY_WIDTH - 1) as u16);
+        let y1 = (y + h - 1).min((DISPLAY_HEIGHT - 1) as u16);
+
+        // 设置地址窗口
+        self.set_address_window(x, y, x1, y1);
+
+        // 发送内存写入命令并开始传输数据
+        let _ = self.cs.set_low();
+        let _ = self.dc.set_low();
+        let _ = self.transfer_byte(commands::RAMWR);
+        let _ = self.dc.set_high();
+
+        // 批量发送像素数据
+        for &byte in pixels {
+            let _ = self.transfer_byte(byte);
+        }
+
+        let _ = self.cs.set_high();
+    }
     ///
     /// # 参数
     /// - `tx`: 可选的串口发送器，用于输出调试信息
