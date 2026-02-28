@@ -41,21 +41,21 @@
 // embedded_graphics - Rust 嵌入式图形库
 // 提供了统一的绘图接口，支持绘制形状、文本、图像等
 use embedded_graphics::{
-    draw_target::DrawTarget,           // 绘图目标 trait，定义如何绘制像素
+    draw_target::DrawTarget,            // 绘图目标 trait，定义如何绘制像素
     geometry::{OriginDimensions, Size}, // 几何类型：尺寸、原点尺寸
-    pixelcolor::Rgb565,                // 颜色格式：16 位 RGB565
-    prelude::*,                        // 常用类型：Point, Pixel, PrimitiveStyle 等
-    primitives::Rectangle,             // 图形：矩形
+    pixelcolor::Rgb565,                 // 颜色格式：16 位 RGB565
+    prelude::*,                         // 常用类型：Point, Pixel, PrimitiveStyle 等
+    primitives::Rectangle,              // 图形：矩形
 };
 
 // embedded_hal - 嵌入式硬件抽象层
 // 定义了与硬件通信的标准接口
-use embedded_hal::blocking::spi::Transfer;  // SPI 传输 trait
-use embedded_hal::digital::v2::OutputPin;   // 输出引脚 trait
+use embedded_hal::blocking::spi::Transfer; // SPI 传输 trait
+use embedded_hal::digital::v2::OutputPin; // 输出引脚 trait
 
 // nb - 非阻塞 I/O 原语
 // 提供了非阻塞操作的标准类型和宏
-use nb::block;  // block! 宏：将非阻塞操作转换为阻塞操作
+use nb::block; // block! 宏：将非阻塞操作转换为阻塞操作
 
 /// 屏幕分辨率 - 水平方向像素数（列数）
 pub const DISPLAY_WIDTH: usize = 240;
@@ -271,9 +271,9 @@ pub struct DisplaySpi<SPI, CS, DC> {
 /// 实现屏幕初始化、数据传输和绘图功能
 impl<SPI, CS, DC> DisplaySpi<SPI, CS, DC>
 where
-    SPI: Transfer<u8>,  // SPI 必须支持 u8 类型的传输操作
-    CS: OutputPin,      // CS 必须是输出引脚
-    DC: OutputPin,      // DC 必须是输出引脚
+    SPI: Transfer<u8>, // SPI 必须支持 u8 类型的传输操作
+    CS: OutputPin,     // CS 必须是输出引脚
+    DC: OutputPin,     // DC 必须是输出引脚
 {
     /// 创建新的显示驱动实例
     ///
@@ -303,9 +303,9 @@ where
     /// SPI 是全双工通信：发送一个字节的同时也会接收一个字节
     /// 使用单元素数组作为缓冲区来满足 embedded_hal 的 Transfer trait
     fn transfer_byte(&mut self, data: u8) -> u8 {
-        let mut buf = [data];  // 创建单元素缓冲区，存放要发送的数据
-        self.spi.transfer(&mut buf).ok();  // 执行 SPI 传输
-        buf[0]  // 返回接收到的数据
+        let mut buf = [data]; // 创建单元素缓冲区，存放要发送的数据
+        self.spi.transfer(&mut buf).ok(); // 执行 SPI 传输
+        buf[0] // 返回接收到的数据
     }
 
     /// 通过 SPI 传输多个字节（批量传输）
@@ -317,7 +317,7 @@ where
     /// 此方法当前未使用，预留给未来可能需要的批量操作
     /// 如果需要一次发送多个字节，使用此方法比循环调用 transfer_byte 更高效
     fn transfer_bytes(&mut self, data: &mut [u8]) {
-        self.spi.transfer(data).ok();  // 批量传输整个缓冲区
+        self.spi.transfer(data).ok(); // 批量传输整个缓冲区
     }
 
     /// 向屏幕发送命令（公共接口，供 LVGL 使用）
@@ -325,10 +325,10 @@ where
     /// # 参数
     /// - `cmd`: 命令代码（如 SWRESET、CASET、RAMWR 等）
     pub fn write_command(&mut self, cmd: u8) {
-        self.cs.set_low().ok();   // 拉低 CS，选中屏幕
-        self.dc.set_low().ok();   // 拉低 DC，表示发送的是命令
-        let _ = self.transfer_byte(cmd);  // 发送命令字节
-        self.cs.set_high().ok();  // 拉高 CS，结束通信
+        self.cs.set_low().ok(); // 拉低 CS，选中屏幕
+        self.dc.set_low().ok(); // 拉低 DC，表示发送的是命令
+        let _ = self.transfer_byte(cmd); // 发送命令字节
+        self.cs.set_high().ok(); // 拉高 CS，结束通信
     }
 
     /// 向屏幕发送单个数据字节（公共接口，供 LVGL 使用）
@@ -336,10 +336,10 @@ where
     /// # 参数
     /// - `data`: 数据字节（如参数值、颜色分量等）
     pub fn write_data(&mut self, data: u8) {
-        self.cs.set_low().ok();   // 拉低 CS，选中屏幕
-        self.dc.set_high().ok();  // 拉高 DC，表示发送的是数据
-        let _ = self.transfer_byte(data);  // 发送数据字节
-        self.cs.set_high().ok();  // 拉高 CS，结束通信
+        self.cs.set_low().ok(); // 拉低 CS，选中屏幕
+        self.dc.set_high().ok(); // 拉高 DC，表示发送的是数据
+        let _ = self.transfer_byte(data); // 发送数据字节
+        self.cs.set_high().ok(); // 拉高 CS，结束通信
     }
 
     /// 向屏幕连续发送多个数据字节
@@ -351,12 +351,12 @@ where
     /// CS 在整个数据传输期间保持低电平，只切换一次
     /// 这比多次调用 write_data 更高效，适合发送大量数据（如伽马表）
     fn write_data_bytes(&mut self, data: &[u8]) {
-        self.cs.set_low().ok();   // 拉低 CS，选中屏幕
-        self.dc.set_high().ok();  // 拉高 DC，表示发送的是数据
+        self.cs.set_low().ok(); // 拉低 CS，选中屏幕
+        self.dc.set_high().ok(); // 拉高 DC，表示发送的是数据
         for &byte in data {
-            let _ = self.transfer_byte(byte);  // 逐字节发送
+            let _ = self.transfer_byte(byte); // 逐字节发送
         }
-        self.cs.set_high().ok();  // 拉高 CS，结束通信
+        self.cs.set_high().ok(); // 拉高 CS，结束通信
     }
 
     /// 发送命令后立即紧跟一个数据字节
@@ -369,12 +369,12 @@ where
     /// 适用于只需要一个参数的命令，比分别调用 write_command 和 write_data 更高效
     /// 整个过程 CS 保持低电平，只切换 DC 引脚
     fn write_cmd_data(&mut self, cmd: u8, data: u8) {
-        self.cs.set_low().ok();   // 拉低 CS，选中屏幕
-        self.dc.set_low().ok();   // 拉低 DC，准备发送命令
-        let _ = self.transfer_byte(cmd);  // 发送命令字节
-        self.dc.set_high().ok();  // 拉高 DC，切换到数据模式
-        let _ = self.transfer_byte(data);  // 发送数据字节
-        self.cs.set_high().ok();  // 拉高 CS，结束通信
+        self.cs.set_low().ok(); // 拉低 CS，选中屏幕
+        self.dc.set_low().ok(); // 拉低 DC，准备发送命令
+        let _ = self.transfer_byte(cmd); // 发送命令字节
+        self.dc.set_high().ok(); // 拉高 DC，切换到数据模式
+        let _ = self.transfer_byte(data); // 发送数据字节
+        self.cs.set_high().ok(); // 拉高 CS，结束通信
     }
 
     /// 向屏幕发送命令（公共版本，供外部模块使用）
@@ -401,14 +401,7 @@ where
     /// - `w`: 宽度
     /// - `h`: 高度
     /// - `pixels`: RGB565 像素数据（每个像素 2 字节，高位在前）
-    pub fn write_pixels_raw(
-        &mut self,
-        x: u16,
-        y: u16,
-        w: u16,
-        h: u16,
-        pixels: &[u8],
-    ) {
+    pub fn write_pixels_raw(&mut self, x: u16, y: u16, w: u16, h: u16, pixels: &[u8]) {
         let x1 = (x + w - 1).min((DISPLAY_WIDTH - 1) as u16);
         let y1 = (y + h - 1).min((DISPLAY_HEIGHT - 1) as u16);
 
@@ -421,9 +414,23 @@ where
         let _ = self.transfer_byte(commands::RAMWR);
         let _ = self.dc.set_high();
 
-        // 批量发送像素数据
+        // 批量发送像素数据（使用缓冲区）
+        let mut buf = [0u8; 256];
+        let mut buf_idx = 0;
+
         for &byte in pixels {
-            let _ = self.transfer_byte(byte);
+            buf[buf_idx] = byte;
+            buf_idx += 1;
+
+            if buf_idx >= buf.len() {
+                self.transfer_bytes(&mut buf);
+                buf_idx = 0;
+            }
+        }
+
+        // 发送剩余数据
+        if buf_idx > 0 {
+            self.transfer_bytes(&mut buf[..buf_idx]);
         }
 
         let _ = self.cs.set_high();
@@ -448,7 +455,7 @@ where
         // === 辅助函数：通过串口发送调试字符串 ===
         let mut write_str = |s: &str| {
             for b in s.bytes() {
-                let _ = block!(tx.write(b));  // 阻塞式发送每个字节
+                let _ = block!(tx.write(b)); // 阻塞式发送每个字节
             }
         };
 
@@ -498,20 +505,20 @@ where
         // === 5. 设置帧率控制 ===
         // 控制屏幕刷新率，影响显示流畅度和功耗
         write_str("[Display] Set frame rate control...\r\n");
-        self.write_cmd_data(commands::FRMCTR1, 0x00);  // 第一个参数
-        self.write_data(0x1B);  // 第二个参数
+        self.write_cmd_data(commands::FRMCTR1, 0x00); // 第一个参数
+        self.write_data(0x1B); // 第二个参数
 
         // === 6. 设置电源控制 ===
         // 配置屏幕内部电源电压，确保稳定显示
         write_str("[Display] Set power control...\r\n");
-        self.write_command(commands::PWCTR1);  // 电源控制 1：GVDD 电压
-        self.write_data(0x23);  // GVDD 电压 = 4.6V
-        self.write_data(0x10);  // 第二个参数
+        self.write_command(commands::PWCTR1); // 电源控制 1：GVDD 电压
+        self.write_data(0x23); // GVDD 电压 = 4.6V
+        self.write_data(0x10); // 第二个参数
 
-        self.write_cmd_data(commands::PWCTR2, 0x10);  // 电源控制 2：VGH/VGL 电压
+        self.write_cmd_data(commands::PWCTR2, 0x10); // 电源控制 2：VGH/VGL 电压
 
-        self.write_cmd_data(commands::VMCTR1, 0x3E);  // VCOM 控制：VCOMH 电压
-        self.write_data(0x28);  // VCOML 电压
+        self.write_cmd_data(commands::VMCTR1, 0x3E); // VCOM 控制：VCOMH 电压
+        self.write_data(0x28); // VCOML 电压
 
         // === 7. 关闭显示反转 ===
         // 使用正常的颜色显示，不进行反转
@@ -525,14 +532,14 @@ where
         self.write_command(commands::GMCTRP1);
         self.write_data_bytes(&[
             0x0F, 0x31, 0x2B, 0x0C, 0x0E, 0x08, 0x4E, 0xF1, 0x37, 0x07, 0x10, 0x03, 0x0E, 0x09,
-            0x00,  // 15 个参数字节
+            0x00, // 15 个参数字节
         ]);
 
         // 负极伽马：控制暗色区域
         self.write_command(commands::GMCTRN1);
         self.write_data_bytes(&[
             0x00, 0x0E, 0x14, 0x03, 0x11, 0x07, 0x31, 0xC1, 0x48, 0x08, 0x0F, 0x0C, 0x31, 0x36,
-            0x0F,  // 15 个参数字节
+            0x0F, // 15 个参数字节
         ]);
 
         // === 9. 开启显示 ===
@@ -574,31 +581,35 @@ where
     /// 设置窗口后，后续发送的像素数据会按顺序填充，
     /// 从左到右、从上到下，一行填满后自动换行。
     fn set_address_window(&mut self, x0: u16, y0: u16, x1: u16, y1: u16) {
+        let _ = self.cs.set_low(); // 拉低 CS，选中屏幕，整个函数期间保持低电平
+
         // === 第一步：设置列地址（X 轴范围）CASET ===
-        let _ = self.cs.set_low();           // 拉低 CS，选中屏幕
-        let _ = self.dc.set_low();           // 拉低 DC，发送命令模式
-        let _ = self.transfer_byte(commands::CASET);  // 发送 CASET 命令
-        let _ = self.dc.set_high();          // 拉高 DC，切换到数据模式
-        // 发送 x0 的两个字节（高字节在前）
-        let _ = self.transfer_byte((x0 >> 8) as u8);  // x0 高字节
-        let _ = self.transfer_byte((x0 & 0xFF) as u8); // x0 低字节
-        // 发送 x1 的两个字节（高字节在前）
-        let _ = self.transfer_byte((x1 >> 8) as u8);  // x1 高字节
-        let _ = self.transfer_byte((x1 & 0xFF) as u8); // x1 低字节
-        let _ = self.cs.set_high();          // 拉高 CS，结束通信
+        let _ = self.dc.set_low(); // 拉低 DC，发送命令模式
+        let _ = self.transfer_byte(commands::CASET); // 发送 CASET 命令
+        let _ = self.dc.set_high(); // 拉高 DC，切换到数据模式
+                                    // 批量发送 x0 和 x1 的四个字节（高字节在前）
+        let mut x_buf = [
+            (x0 >> 8) as u8,   // x0 高字节
+            (x0 & 0xFF) as u8, // x0 低字节
+            (x1 >> 8) as u8,   // x1 高字节
+            (x1 & 0xFF) as u8, // x1 低字节
+        ];
+        self.transfer_bytes(&mut x_buf);
 
         // === 第二步：设置页地址（Y 轴范围）PASET ===
-        let _ = self.cs.set_low();           // 拉低 CS，选中屏幕
-        let _ = self.dc.set_low();           // 拉低 DC，发送命令模式
-        let _ = self.transfer_byte(commands::PASET);  // 发送 PASET 命令
-        let _ = self.dc.set_high();          // 拉高 DC，切换到数据模式
-        // 发送 y0 的两个字节（高字节在前）
-        let _ = self.transfer_byte((y0 >> 8) as u8);  // y0 高字节
-        let _ = self.transfer_byte((y0 & 0xFF) as u8); // y0 低字节
-        // 发送 y1 的两个字节（高字节在前）
-        let _ = self.transfer_byte((y1 >> 8) as u8);  // y1 高字节
-        let _ = self.transfer_byte((y1 & 0xFF) as u8); // y1 低字节
-        let _ = self.cs.set_high();          // 拉高 CS，结束通信
+        let _ = self.dc.set_low(); // 拉低 DC，发送命令模式
+        let _ = self.transfer_byte(commands::PASET); // 发送 PASET 命令
+        let _ = self.dc.set_high(); // 拉高 DC，切换到数据模式
+                                    // 批量发送 y0 和 y1 的四个字节（高字节在前）
+        let mut y_buf = [
+            (y0 >> 8) as u8,   // y0 高字节
+            (y0 & 0xFF) as u8, // y0 低字节
+            (y1 >> 8) as u8,   // y1 高字节
+            (y1 & 0xFF) as u8, // y1 低字节
+        ];
+        self.transfer_bytes(&mut y_buf);
+
+        let _ = self.cs.set_high(); // 拉高 CS，结束通信
     }
 
     /// 填充整个屏幕为指定颜色
@@ -644,7 +655,7 @@ where
         // Rgb565 转 u16：16 位颜色值
         let pixel_color = color.into_storage();
         // 将 16 位颜色拆分为两个字节
-        let high_byte = (pixel_color >> 8) as u8;  // 高字节
+        let high_byte = (pixel_color >> 8) as u8; // 高字节
         let low_byte = (pixel_color & 0xFF) as u8; // 低字节
 
         // 计算需要发送的像素总数
@@ -653,10 +664,6 @@ where
         // === 第四步：发送 RAMWR 命令并连续传输像素数据 ===
         // 关键优化：在整个填充过程中保持 CS 低电平
         // 避免频繁切换 CS 引脚，大幅提高速度
-        let _ = self.cs.set_low();           // 拉低 CS，选中屏幕
-        let _ = self.dc.set_low();           // 拉低 DC，发送命令
-        let _ = self.transfer_byte(commands::RAMWR);  // 发送内存写入命令
-        let _ = self.dc.set_high();          // 拉高 DC，切换到数据模式
 
         // 批量传输：使用 512 字节缓冲区
         const BUF_SIZE: usize = 512;
@@ -781,10 +788,18 @@ where
                 count += 1;
 
                 // 更新边界框
-                if x < min_x { min_x = x; }
-                if y < min_y { min_y = y; }
-                if x > max_x { max_x = x; }
-                if y > max_y { max_y = y; }
+                if x < min_x {
+                    min_x = x;
+                }
+                if y < min_y {
+                    min_y = y;
+                }
+                if x > max_x {
+                    max_x = x;
+                }
+                if y > max_y {
+                    max_y = y;
+                }
             }
         }
 
@@ -802,6 +817,10 @@ where
         let _ = self.cs.set_low();
         let _ = self.dc.set_high();
 
+        // 使用缓冲区批量传输
+        let mut buf = [0u8; 256]; // 128 像素 × 2 字节
+        let mut buf_idx = 0;
+
         // 遍历边界框内的每个位置
         for y in min_y..=max_y {
             for x in min_x..=max_x {
@@ -814,11 +833,23 @@ where
                     }
                 }
 
-                // 发送颜色（如果没有像素，发送黑色）
+                // 写入缓冲区（如果没有像素，发送黑色）
                 let color = pixel_color.unwrap_or(0);
-                let _ = self.transfer_byte((color >> 8) as u8);
-                let _ = self.transfer_byte((color & 0xFF) as u8);
+                buf[buf_idx] = (color >> 8) as u8;
+                buf[buf_idx + 1] = (color & 0xFF) as u8;
+                buf_idx += 2;
+
+                // 缓冲区满时发送
+                if buf_idx >= buf.len() {
+                    self.transfer_bytes(&mut buf);
+                    buf_idx = 0;
+                }
             }
+        }
+
+        // 发送剩余数据
+        if buf_idx > 0 {
+            self.transfer_bytes(&mut buf[..buf_idx]);
         }
 
         let _ = self.cs.set_high();
@@ -868,11 +899,26 @@ where
         let _ = self.cs.set_low();
         let _ = self.dc.set_high();
 
-        // 遍历颜色迭代器，逐像素发送
+        // 使用缓冲区批量发送像素数据
+        let mut buf = [0u8; 256]; // 128 像素 × 2 字节
+        let mut buf_idx = 0;
+
         for color in colors {
             let pixel_color = color.into_storage();
-            let _ = self.transfer_byte((pixel_color >> 8) as u8);
-            let _ = self.transfer_byte((pixel_color & 0xFF) as u8);
+            buf[buf_idx] = (pixel_color >> 8) as u8;
+            buf[buf_idx + 1] = (pixel_color & 0xFF) as u8;
+            buf_idx += 2;
+
+            // 缓冲区满时发送
+            if buf_idx >= buf.len() {
+                self.transfer_bytes(&mut buf);
+                buf_idx = 0;
+            }
+        }
+
+        // 发送剩余数据
+        if buf_idx > 0 {
+            self.transfer_bytes(&mut buf[..buf_idx]);
         }
 
         let _ = self.cs.set_high();
