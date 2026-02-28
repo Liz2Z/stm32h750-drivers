@@ -316,12 +316,17 @@ impl ProgressBar {
         self
     }
 
+    /// 设置进度值（会被限制在 min-max 范围内）
+    pub fn set_value(&mut self, value: i32) {
+        self.value = value.clamp(self.min, self.max);
+    }
+
     fn fill_width(&self) -> u32 {
         if self.max <= self.min {
             return 0;
         }
         let ratio = (self.value - self.min) as f32 / (self.max - self.min) as f32;
-        ((ratio * self.width as f32).max(0.0).min(1.0) * self.width as f32) as u32
+        (ratio.clamp(0.0, 1.0) * self.width as f32) as u32
     }
 
     pub fn draw<D>(&self, display: &mut D) -> Result<(), D::Error>
@@ -353,10 +358,10 @@ impl ProgressBar {
 
         // 填充条
         let fill_w = self.fill_width();
-        if fill_w > 0 {
+        if fill_w > 2 {
             Rectangle::new(
                 Point::new(self.x + 1, self.y + 1),
-                Size::new(fill_w.saturating_sub(2), self.height.saturating_sub(2)),
+                Size::new((fill_w - 2).min(self.width - 2), self.height.saturating_sub(2)),
             )
             .into_styled(embedded_graphics::primitives::PrimitiveStyle::with_fill(
                 self.theme.primary,
@@ -423,6 +428,19 @@ impl Screen {
         self.widgets.push(Widget::ProgressBar(progress)).map_err(|_| ())
     }
 
+    /// 获取指定 ID 的进度条可变引用
+    pub fn get_progress_bar(&mut self, id: u32) -> Option<&mut ProgressBar> {
+        for widget in &mut self.widgets {
+            if let Widget::ProgressBar(pb) = widget {
+                if pb.id == id {
+                    return Some(pb);
+                }
+            }
+        }
+        None
+    }
+
+    /// 绘制整个屏幕（包括清屏）
     pub fn draw<D>(&self, display: &mut D) -> Result<(), D::Error>
     where
         D: DrawTarget<Color = Rgb565>,
@@ -444,4 +462,46 @@ impl Screen {
 
         Ok(())
     }
+
+    /// 只绘制指定类型的控件（用于局部更新）
+    pub fn draw_widgets_by_type<D>(&self, display: &mut D, widget_type: WidgetType) -> Result<(), D::Error>
+    where
+        D: DrawTarget<Color = Rgb565>,
+    {
+        for widget in &self.widgets {
+            let should_draw = match (widget_type, widget) {
+                (WidgetType::Button, Widget::Button(_)) => true,
+                (WidgetType::Label, Widget::Label(_)) => true,
+                (WidgetType::ProgressBar, Widget::ProgressBar(_)) => true,
+                _ => false,
+            };
+            if should_draw {
+                widget.draw(display)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// 直接获取指定 ID 的进度条引用并绘制（不经过 Screen）
+    pub fn draw_progress_bar_only<D>(&self, display: &mut D, id: u32) -> Result<(), D::Error>
+    where
+        D: DrawTarget<Color = Rgb565>,
+    {
+        for widget in &self.widgets {
+            if let Widget::ProgressBar(pb) = widget {
+                if pb.id == id {
+                    return pb.draw(display);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// 控件类型枚举
+#[derive(Clone, Copy, Debug)]
+pub enum WidgetType {
+    Button,
+    Label,
+    ProgressBar,
 }
