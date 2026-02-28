@@ -10,12 +10,10 @@ use panic_halt as _;
 use stm32h7xx_hal::pac;
 use stm32h7xx_hal::prelude::*;
 use stm32h7xx_hal::spi;
+use cortex_m::peripheral::DWT;
 
 use display::DisplaySpi;
-use embedded_graphics::{
-    pixelcolor::Rgb565,
-    prelude::*,
-};
+use embedded_graphics::{pixelcolor::Rgb565, prelude::*};
 
 use ui::{Button, Label, ProgressBar, Screen, Theme};
 
@@ -37,8 +35,61 @@ macro_rules! write_str {
     };
 }
 
+// 宏：写入数字到串口
+macro_rules! write_num {
+    ($tx:expr, $n:expr) => {
+        {
+            let mut n = $n;
+            let mut buf = [0u8; 12];
+            let mut i = 0;
+            if n == 0 {
+                buf[i] = b'0';
+                i = 1;
+            } else {
+                let mut temp = n;
+                let mut len = 0;
+                while temp > 0 {
+                    len += 1;
+                    temp /= 10;
+                }
+                i = len;
+                while n > 0 {
+                    i -= 1;
+                    buf[i] = b'0' + (n % 10) as u8;
+                    n /= 10;
+                }
+                i = len;
+            }
+            for j in 0..i {
+                let _ = block!($tx.write(buf[j]));
+            }
+        }
+    };
+}
+
+// 宏：测量并输出耗时
+macro_rules! measure_time {
+    ($tx:expr, $name:expr, $operation:block) => {
+        {
+            let start = DWT::get_cycle_count();
+            $operation
+            let end = DWT::get_cycle_count();
+            let cycles = end.wrapping_sub(start);
+            let time_us = cycles / 400; // 400MHz = 400 cycles/us
+            write_str!($tx, $name);
+            write_str!($tx, " took: ");
+            write_num!($tx, time_us / 1000);
+            write_str!($tx, ".");
+            write_num!($tx, (time_us % 1000) / 100);
+            write_str!($tx, " ms\r\n");
+            time_us
+        }
+    };
+}
+
 #[entry]
 fn main() -> ! {
+    let cp = cortex_m::Peripherals::take().unwrap();
     let dp = pac::Peripherals::take().unwrap();
 
     let pwr = dp.PWR.constrain();
@@ -50,6 +101,10 @@ fn main() -> ! {
         .pll1_q_ck(400.MHz())
         .freeze(pwrcfg, &dp.SYSCFG);
 
+    // 启用 DWT 周期计数器
+    let mut dwt = cp.DWT;
+    dwt.enable_cycle_counter();
+
     let gpioa = dp.GPIOA.split(ccdr.peripheral.GPIOA);
     let gpiob = dp.GPIOB.split(ccdr.peripheral.GPIOB);
     let mut led = gpioa.pa1.into_push_pull_output();
@@ -58,9 +113,10 @@ fn main() -> ! {
     let mut disp_blk = gpiob.pb0.into_push_pull_output();
     let disp_dc = gpiob.pb1.into_push_pull_output();
     let disp_cs = gpiob.pb12.into_push_pull_output();
-    let disp_sck = gpiob.pb13.into_alternate::<5>();
-    let disp_miso = gpiob.pb14.into_alternate::<5>();
-    let disp_mosi = gpiob.pb15.into_alternate::<5>();
+    // SPI 引脚需要 VeryHigh 速度才能支持 48MHz
+    let disp_sck = gpiob.pb13.into_alternate::<5>().speed(stm32h7xx_hal::gpio::Speed::VeryHigh);
+    let disp_miso = gpiob.pb14.into_alternate::<5>().speed(stm32h7xx_hal::gpio::Speed::VeryHigh);
+    let disp_mosi = gpiob.pb15.into_alternate::<5>().speed(stm32h7xx_hal::gpio::Speed::VeryHigh);
 
     // LED 快闪 10 次
     for _ in 0..10 {
@@ -71,12 +127,12 @@ fn main() -> ! {
     // 打开背光
     let _ = disp_blk.set_high();
 
-    // USART2
-    let tx = gpioa.pa2.into_alternate::<7>();
-    let rx = gpioa.pa3.into_alternate::<7>();
+    // USART1 (PA9/PA10)
+    let tx = gpioa.pa9.into_alternate::<7>();
+    let rx = gpioa.pa10.into_alternate::<7>();
     let serial = dp
-        .USART2
-        .serial((tx, rx), 9600.bps(), ccdr.peripheral.USART2, &ccdr.clocks)
+        .USART1
+        .serial((tx, rx), 9600.bps(), ccdr.peripheral.USART1, &ccdr.clocks)
         .unwrap();
     let (mut tx, _rx) = serial.split();
 
@@ -96,8 +152,31 @@ fn main() -> ! {
     display.init(&mut tx);
     write_str!(tx, "Display init complete!\r\n");
 
-    // 清屏
-    display.clear(Rgb565::BLACK).unwrap();
+    // 测量原始 SPI 速度
+    write_str!(tx, "\r\n=== SPI Speed Test ===\r\n");
+    measure_time!(tx, "Raw SPI (10000 bytes)", {
+        display.test_spi_speed();
+    });
+    write_str!(tx, "Expected at 48MHz: ~1.7 ms\r\n");
+
+    measure_time!(tx, "Bulk SPI (10000 bytes)", {
+        display.test_spi_speed_bulk();
+    });
+    write_str!(tx, "\r\n");
+
+    // 测量清屏耗时
+    write_str!(tx, "=== Benchmark Start ===\r\n");
+    measure_time!(tx, "Clear screen (BLACK)", {
+        display.clear(Rgb565::BLACK).unwrap();
+    });
+
+    measure_time!(tx, "Clear screen (WHITE)", {
+        display.clear(Rgb565::WHITE).unwrap();
+    });
+
+    measure_time!(tx, "Clear screen (BLACK again)", {
+        display.clear(Rgb565::BLACK).unwrap();
+    });
 
     // LED 快闪 5 次表示进入主循环
     for _ in 0..5 {
@@ -124,8 +203,7 @@ fn main() -> ! {
     let _ = screen.add_button(btn2);
 
     // 添加进度条
-    let progress = ProgressBar::new(1, 20, 130, 200, 25)
-        .with_range(0, 100);
+    let progress = ProgressBar::new(1, 20, 130, 200, 25).with_range(0, 100);
     let _ = screen.add_progress(progress);
 
     // 添加状态标签
@@ -134,8 +212,12 @@ fn main() -> ! {
 
     write_str!(tx, "UI screen created!\r\n");
 
-    // 初始绘制
-    screen.draw(&mut display).unwrap();
+    // 测量初始绘制耗时
+    measure_time!(tx, "Initial full screen draw", {
+        screen.draw(&mut display).unwrap();
+    });
+
+    write_str!(tx, "\r\n=== Benchmark End ===\r\n\r\n");
 
     write_str!(tx, "Starting main loop...\r\n");
 
@@ -143,6 +225,7 @@ fn main() -> ! {
     let mut anim_value: i32 = 0;
     let mut anim_direction: i32 = 1;
     let mut frame_count: u32 = 0;
+    let mut last_val1: i32 = -1;
 
     // 主循环
     loop {
@@ -156,10 +239,19 @@ fn main() -> ! {
             anim_direction = 1;
         }
 
-        // 模拟更新进度条值
-        // 注意：这里需要修改 Screen 的实现来支持修改控件
-        // 暂时重新绘制整个屏幕
-        screen.draw(&mut display).unwrap();
+        // 只在值变化时更新
+        let changed1 = anim_value != last_val1;
+
+        if changed1 {
+            if let Some(pb) = screen.get_progress_bar(1) {
+                pb.set_value(anim_value);
+            }
+            last_val1 = anim_value;
+            // 只重绘变化的进度条（不刷整个屏幕）
+            measure_time!(tx, "Progress bar update", {
+                let _ = screen.draw_progress_bar_only(&mut display, 1);
+            });
+        }
 
         frame_count += 1;
 
@@ -168,6 +260,6 @@ fn main() -> ! {
             let _ = led.toggle();
         }
 
-        delay_ms(16); // 约 60fps
+        delay_ms(100); // 约 24fps
     }
 }
