@@ -245,6 +245,7 @@ impl TempHumidSensor {
         if humid < self.humid_low || self.humid_low == 0.0 {
             self.humid_low = humid;
         }
+        self.add_history(humid);
     }
 
     /// 添加历史记录

@@ -16,7 +16,7 @@ use display::{init_frame_buffer, DisplayDriver};
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
 
-use ui::{Button, GrayTheme, Label, ProgressBar, Screen};
+use ui::{GrayTheme, HistoryBar, Label, Screen, TempHumidCard};
 
 // 延时函数
 fn delay_ms(ms: u32) {
@@ -88,66 +88,47 @@ fn main() -> ! {
     let mut display = DisplayDriver::new(spi, disp_cs, disp_dc);
     display.init(&mut delay_ms);
 
-    // 使用 DMA 清屏（黑色背景）
-    display.clear(Rgb565::BLACK).unwrap();
+    // 使用 DMA 清屏（白色背景）
+    display.clear(Rgb565::WHITE).unwrap();
     display.flush();
 
-    // 创建 UI 屏幕（240x320）
-    let screen = Screen::new(240, 320).with_theme(GrayTheme::new());
-
-    // 添加标题标签
-    let title = Label::new(120, 20, "DMA UI Demo").centered();
+    // 创建 UI 屏幕（320x240）
+    let screen = Screen::new(320, 240).with_theme(GrayTheme::new());
     let mut screen = screen;
+
+    // ===== 温湿度传感器测试场景 =====
+
+    // 1. 创建温度卡片
+    let mut temp_card = TempHumidCard::new(20, 40, true); // show_temp = true
+    temp_card.sensor.update_temp(25.5);
+    temp_card.sensor.temp_high = 28.0;
+    temp_card.sensor.temp_low = 22.0;
+    let _ = screen.add_temp_humd_card(temp_card);
+
+    // 2. 创建湿度卡片
+    let mut humid_card = TempHumidCard::new(170, 40, false); // show_temp = false
+    humid_card.sensor.update_humid(60.0);
+    humid_card.sensor.humid_high = 65.0;
+    humid_card.sensor.humid_low = 55.0;
+    let _ = screen.add_temp_humd_card(humid_card);
+
+    // 3. 创建历史记录条
+    let mut history = HistoryBar::new(20, 180);
+    history.update(&[24.0, 23.0, 25.0, 26.0, 25.5, 25.0]);
+    let _ = screen.add_history_bar(history);
+
+    // 4. 添加标题
+    let title = Label::new(160, 10, "TEMP/HUMID DASHBOARD").centered();
     let _ = screen.add_label(title);
-
-    // 添加按钮
-    let btn1 = Button::new(1, 20, 60, 90, 40, "Button 1");
-    let _ = screen.add_button(btn1);
-
-    let btn2 = Button::new(2, 130, 60, 90, 40, "Button 2");
-    let _ = screen.add_button(btn2);
-
-    // 添加进度条
-    let progress = ProgressBar::new(1, 20, 130, 200, 25).with_range(0, 100);
-    let _ = screen.add_progress(progress);
-
-    // 添加状态标签
-    let status = Label::new(120, 180, "Status: DMA Ready").centered();
-    let _ = screen.add_label(status);
 
     // 初始绘制（使用 DMA 批量传输）
     screen.draw_with_dma(&mut display).unwrap();
 
     // 动画状态
-    let mut anim_value: i32 = 0;
-    let mut anim_direction: i32 = 1;
     let mut frame_count: u32 = 0;
-    let mut last_val1: i32 = -1;
 
     // 主循环
     loop {
-        // 更新进度条动画
-        anim_value += anim_direction * 2;
-        if anim_value >= 100 {
-            anim_value = 100;
-            anim_direction = -1;
-        } else if anim_value <= 0 {
-            anim_value = 0;
-            anim_direction = 1;
-        }
-
-        // 只在值变化时更新
-        let changed1 = anim_value != last_val1;
-
-        if changed1 {
-            if let Some(pb) = screen.get_progress_bar(1) {
-                pb.set_value(anim_value);
-            }
-            last_val1 = anim_value;
-            // 使用 DMA 更新进度条
-            let _ = screen.update_progress_bar_with_dma(&mut display, 1);
-        }
-
         frame_count += 1;
 
         // LED 慢闪表示运行中
@@ -155,6 +136,6 @@ fn main() -> ! {
             let _ = led.toggle();
         }
 
-        delay_ms(16); // 约 10fps
+        delay_ms(16); // 约 60fps
     }
 }
