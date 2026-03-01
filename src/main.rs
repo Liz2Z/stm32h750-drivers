@@ -16,7 +16,7 @@ use display::{init_frame_buffer, DisplayDriver};
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
 
-use ui::{Button, Label, ProgressBar, Screen, Theme};
+use ui::{Button, GrayTheme, Label, ProgressBar, Screen};
 
 // 延时函数
 fn delay_ms(ms: u32) {
@@ -93,7 +93,7 @@ fn main() -> ! {
     display.flush();
 
     // 创建 UI 屏幕（240x320）
-    let screen = Screen::new(240, 320).with_theme(Theme::dark());
+    let screen = Screen::new(240, 320).with_theme(GrayTheme::new());
 
     // 添加标题标签
     let title = Label::new(120, 20, "DMA UI Demo").centered();
