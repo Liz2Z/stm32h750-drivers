@@ -978,6 +978,8 @@ pub enum Widget {
     Button(Button),
     Label(Label),
     ProgressBar(ProgressBar),
+    TempHumidCard(TempHumidCard),
+    HistoryBar(HistoryBar),
 }
 
 impl Widget {
@@ -989,6 +991,8 @@ impl Widget {
             Widget::Button(b) => b.draw(display),
             Widget::Label(l) => l.draw(display),
             Widget::ProgressBar(p) => p.draw(display),
+            Widget::TempHumidCard(c) => c.draw(display),
+            Widget::HistoryBar(h) => h.draw(display),
         }
     }
 
@@ -998,6 +1002,8 @@ impl Widget {
             Widget::Button(b) => b.bounding_box(),
             Widget::Label(l) => l.bounding_box(),
             Widget::ProgressBar(p) => p.bounding_box(),
+            Widget::TempHumidCard(c) => c.bounding_box(),
+            Widget::HistoryBar(h) => h.bounding_box(),
         }
     }
 }
@@ -1040,6 +1046,14 @@ impl Screen {
         self.widgets
             .push(Widget::ProgressBar(progress))
             .map_err(|_| ())
+    }
+
+    pub fn add_temp_humd_card(&mut self, card: TempHumidCard) -> Result<(), ()> {
+        self.widgets.push(Widget::TempHumidCard(card)).map_err(|_| ())
+    }
+
+    pub fn add_history_bar(&mut self, bar: HistoryBar) -> Result<(), ()> {
+        self.widgets.push(Widget::HistoryBar(bar)).map_err(|_| ())
     }
 
     /// 获取指定 ID 的进度条可变引用
