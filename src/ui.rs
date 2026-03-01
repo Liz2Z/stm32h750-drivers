@@ -9,11 +9,11 @@
 //! - 控件使用 fill_solid 进行大面积填充
 
 use embedded_graphics::{
+    mono_font::{ascii::FONT_10X20, MonoTextStyle},
     pixelcolor::Rgb565,
     prelude::*,
     primitives::Rectangle,
-    mono_font::{ascii::FONT_10X20, MonoTextStyle},
-    text::{Text, Baseline},
+    text::{Baseline, Text},
 };
 
 /// 颜色主题
@@ -80,7 +80,12 @@ pub struct BoundingBox {
 
 impl BoundingBox {
     pub fn new(x: i32, y: i32, width: u32, height: u32) -> Self {
-        Self { x, y, width, height }
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 
     /// 转换为 Rectangle
@@ -188,7 +193,10 @@ impl Button {
         };
 
         display.fill_solid(
-            &Rectangle::new(Point::new(self.x, self.y), Size::new(self.width, self.height)),
+            &Rectangle::new(
+                Point::new(self.x, self.y),
+                Size::new(self.width, self.height),
+            ),
             btn_color,
         )?;
 
@@ -293,20 +301,12 @@ impl Label {
         let text = if self.centered {
             Text::with_baseline(
                 self.text,
-                Point::new(
-                    self.x - (self.text.len() * 6) as i32 / 2,
-                    self.y,
-                ),
+                Point::new(self.x - (self.text.len() * 6) as i32 / 2, self.y),
                 style,
                 Baseline::Top,
             )
         } else {
-            Text::with_baseline(
-                self.text,
-                Point::new(self.x, self.y),
-                style,
-                Baseline::Top,
-            )
+            Text::with_baseline(self.text, Point::new(self.x, self.y), style, Baseline::Top)
         };
 
         text.draw(display)?;
@@ -411,10 +411,7 @@ impl ProgressBar {
 
         // 边框 - 简化为填充
         display.fill_solid(
-            &Rectangle::new(
-                Point::new(self.x, self.y),
-                Size::new(self.width, 1),
-            ),
+            &Rectangle::new(Point::new(self.x, self.y), Size::new(self.width, 1)),
             self.theme.border,
         )?;
         display.fill_solid(
@@ -425,10 +422,7 @@ impl ProgressBar {
             self.theme.border,
         )?;
         display.fill_solid(
-            &Rectangle::new(
-                Point::new(self.x, self.y),
-                Size::new(1, self.height),
-            ),
+            &Rectangle::new(Point::new(self.x, self.y), Size::new(1, self.height)),
             self.theme.border,
         )?;
         display.fill_solid(
@@ -455,23 +449,6 @@ impl ProgressBar {
         }
 
         Ok(())
-    }
-
-    /// 仅绘制变化部分（DMA 局部更新）
-    ///
-    /// 如果进度条值变化，只重绘填充区域
-    pub fn draw_incremental<D>(&self, display: &mut D) -> Result<(), D::Error>
-    where
-        D: DrawTarget<Color = Rgb565>,
-    {
-        let current_fill = self.fill_width();
-
-        if current_fill == self.last_fill_width {
-            return Ok(()); // 无变化，跳过
-        }
-
-        // 绘制整个进度条（简化实现）
-        self.draw(display)
     }
 }
 
@@ -539,7 +516,9 @@ impl Screen {
     }
 
     pub fn add_progress(&mut self, progress: ProgressBar) -> Result<(), ()> {
-        self.widgets.push(Widget::ProgressBar(progress)).map_err(|_| ())
+        self.widgets
+            .push(Widget::ProgressBar(progress))
+            .map_err(|_| ())
     }
 
     /// 获取指定 ID 的进度条可变引用
@@ -557,12 +536,9 @@ impl Screen {
     /// 标记整个屏幕为脏（需要全屏重绘）
     pub fn mark_full_dirty(&mut self) {
         self.dirty_rects.clear();
-        let _ = self.dirty_rects.push(BoundingBox::new(
-            0,
-            0,
-            self.width,
-            self.height,
-        ));
+        let _ = self
+            .dirty_rects
+            .push(BoundingBox::new(0, 0, self.width, self.height));
     }
 
     /// 添加脏矩形
@@ -704,12 +680,7 @@ impl Screen {
                     pb.draw(display)?;
 
                     // 局部刷新
-                    display.flush_rect(
-                        bb.x as u16,
-                        bb.y as u16,
-                        bb.width as u16,
-                        bb.height as u16,
-                    );
+                    display.flush_rect(bb.x as u16, bb.y as u16, bb.width as u16, bb.height as u16);
 
                     return Ok(());
                 }
