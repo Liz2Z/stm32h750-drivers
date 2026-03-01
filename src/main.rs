@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 
+mod adc_ntc;
 mod display;
 mod profiler;
 mod serial;
