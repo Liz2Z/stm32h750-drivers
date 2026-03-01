@@ -16,56 +16,76 @@ use embedded_graphics::{
     text::{Baseline, Text},
 };
 
-/// 颜色主题
+/// 灰度主题（8 级灰度）
 #[derive(Clone, Copy)]
-pub struct Theme {
-    /// 背景色
-    pub background: Rgb565,
-    /// 主要颜色（按钮等）
-    pub primary: Rgb565,
-    /// 次要颜色
-    pub secondary: Rgb565,
-    /// 文字颜色
-    pub text: Rgb565,
-    /// 边框颜色
-    pub border: Rgb565,
-    /// 阴影颜色
-    pub shadow: Rgb565,
-    /// 高亮颜色
-    pub highlight: Rgb565,
+pub struct GrayTheme {
+    /// g0 - 黑色 - 线条、文字
+    pub g0: Rgb565,
+    /// g1 - 最深灰 - 按下按钮
+    pub g1: Rgb565,
+    /// g2 - 深灰 - 进度条填充
+    pub g2: Rgb565,
+    /// g3 - 中深灰 - 边框阴影
+    pub g3: Rgb565,
+    /// g4 - 中浅灰 - 普通按钮
+    pub g4: Rgb565,
+    /// g5 - 浅灰 - 禁用状态、扫描线
+    pub g5: Rgb565,
+    /// g6 - 最浅灰 - 辅助背景
+    pub g6: Rgb565,
+    /// g7 - 白色 - 主背景
+    pub g7: Rgb565,
 }
 
-impl Default for Theme {
+impl Default for GrayTheme {
     fn default() -> Self {
-        Self::dark()
+        Self::new()
     }
 }
 
-impl Theme {
-    /// 深色主题
-    pub fn dark() -> Self {
+impl GrayTheme {
+    /// 创建默认灰度主题
+    pub fn new() -> Self {
         Self {
-            background: Rgb565::new(20, 20, 25),
-            primary: Rgb565::new(0, 76, 255),
-            secondary: Rgb565::new(60, 60, 80),
-            text: Rgb565::WHITE,
-            border: Rgb565::new(40, 40, 50),
-            shadow: Rgb565::new(10, 10, 15),
-            highlight: Rgb565::new(0, 122, 255),
+            g0: Rgb565::new(0, 0, 0),       // 黑色
+            g1: Rgb565::new(40, 40, 40),   // 最深灰
+            g2: Rgb565::new(80, 80, 80),   // 深灰
+            g3: Rgb565::new(120, 120, 120), // 中深灰
+            g4: Rgb565::new(160, 160, 160), // 中浅灰
+            g5: Rgb565::new(200, 200, 200), // 浅灰
+            g6: Rgb565::new(230, 230, 230), // 最浅灰
+            g7: Rgb565::new(255, 255, 255), // 白色
         }
     }
 
-    /// 浅色主题
-    pub fn light() -> Self {
-        Self {
-            background: Rgb565::new(240, 240, 245),
-            primary: Rgb565::new(0, 122, 255),
-            secondary: Rgb565::new(200, 200, 210),
-            text: Rgb565::BLACK,
-            border: Rgb565::new(180, 180, 190),
-            shadow: Rgb565::new(200, 200, 210),
-            highlight: Rgb565::new(0, 150, 255),
-        }
+    /// 获取文字颜色（黑色）
+    pub fn text(&self) -> Rgb565 {
+        self.g0
+    }
+
+    /// 获取边框颜色（黑色）
+    pub fn border(&self) -> Rgb565 {
+        self.g0
+    }
+
+    /// 获取背景颜色（白色）
+    pub fn background(&self) -> Rgb565 {
+        self.g7
+    }
+
+    /// 获取主填充颜色（中浅灰）
+    pub fn primary(&self) -> Rgb565 {
+        self.g4
+    }
+
+    /// 获取按下状态颜色（最深灰）
+    pub fn pressed(&self) -> Rgb565 {
+        self.g1
+    }
+
+    /// 获取禁用状态颜色（浅灰）
+    pub fn disabled(&self) -> Rgb565 {
+        self.g5
     }
 }
 
@@ -116,7 +136,7 @@ pub struct Button {
     /// 按钮文字
     pub text: &'static str,
     /// 主题
-    pub theme: Theme,
+    pub theme: GrayTheme,
     /// 是否被按下
     pub pressed: bool,
     /// 按钮ID
@@ -134,7 +154,7 @@ impl Button {
             width,
             height,
             text,
-            theme: Theme::dark(),
+            theme: GrayTheme::new(),
             pressed: false,
             id,
             enabled: true,
@@ -142,7 +162,7 @@ impl Button {
     }
 
     /// 设置主题
-    pub fn with_theme(mut self, theme: Theme) -> Self {
+    pub fn with_theme(mut self, theme: GrayTheme) -> Self {
         self.theme = theme;
         self
     }
@@ -160,36 +180,20 @@ impl Button {
     /// 绘制按钮（DMA 优化版本）
     ///
     /// 使用 fill_solid 进行大面积填充，适合 DMA 批量传输
+    /// 极简线框风格：1px 边框，无阴影
     pub fn draw<D>(&self, display: &mut D) -> Result<(), D::Error>
     where
         D: DrawTarget<Color = Rgb565>,
     {
-        let style = MonoTextStyle::new(&FONT_10X20, self.theme.text);
-
-        // 绘制阴影 - 使用 fill_solid 进行大面积填充（DMA 友好）
-        if self.pressed {
-            display.fill_solid(
-                &Rectangle::new(
-                    Point::new(self.x, self.y + 2),
-                    Size::new(self.width, self.height),
-                ),
-                self.theme.shadow,
-            )?;
-        } else {
-            display.fill_solid(
-                &Rectangle::new(
-                    Point::new(self.x + 2, self.y + 2),
-                    Size::new(self.width, self.height),
-                ),
-                self.theme.shadow,
-            )?;
-        }
+        let style = MonoTextStyle::new(&FONT_10X20, self.theme.text());
 
         // 绘制按钮主体 - 使用 fill_solid
-        let btn_color = if self.pressed || !self.enabled {
-            self.theme.secondary
+        let btn_color = if !self.enabled {
+            self.theme.disabled() // 浅灰 - 禁用状态
+        } else if self.pressed {
+            self.theme.pressed() // 最深灰 - 按下状态
         } else {
-            self.theme.primary
+            self.theme.primary() // 中浅灰 - 普通按钮
         };
 
         display.fill_solid(
@@ -200,39 +204,38 @@ impl Button {
             btn_color,
         )?;
 
-        // 绘制边框 - 简化为细线边框，减少 DMA 传输次数
+        // 绘制 1px 边框 - 极简线框风格
         let border_color = if self.pressed {
-            self.theme.highlight
+            self.theme.g2 // 深灰 - 按下时的高亮边框
         } else {
-            self.theme.border
+            self.theme.border() // 黑色 - 普通边框
         };
 
-        // 合并边框绘制 - 上下左右作为一个区域
         // 上边框
         display.fill_solid(
-            &Rectangle::new(Point::new(self.x, self.y), Size::new(self.width, 2)),
+            &Rectangle::new(Point::new(self.x, self.y), Size::new(self.width, 1)),
             border_color,
         )?;
         // 下边框
         display.fill_solid(
             &Rectangle::new(
-                Point::new(self.x, self.y + self.height as i32 - 2),
-                Size::new(self.width, 2),
+                Point::new(self.x, self.y + self.height as i32 - 1),
+                Size::new(self.width, 1),
             ),
-            self.theme.border,
+            self.theme.border(),
         )?;
         // 左边框
         display.fill_solid(
-            &Rectangle::new(Point::new(self.x, self.y), Size::new(2, self.height)),
+            &Rectangle::new(Point::new(self.x, self.y), Size::new(1, self.height)),
             border_color,
         )?;
         // 右边框
         display.fill_solid(
             &Rectangle::new(
-                Point::new(self.x + self.width as i32 - 2, self.y),
-                Size::new(2, self.height),
+                Point::new(self.x + self.width as i32 - 1, self.y),
+                Size::new(1, self.height),
             ),
-            self.theme.border,
+            self.theme.border(),
         )?;
 
         // 绘制文字（居中）
@@ -256,7 +259,7 @@ pub struct Label {
     pub x: i32,
     pub y: i32,
     pub text: &'static str,
-    pub theme: Theme,
+    pub theme: GrayTheme,
     pub centered: bool,
 }
 
@@ -266,12 +269,12 @@ impl Label {
             x,
             y,
             text,
-            theme: Theme::dark(),
+            theme: GrayTheme::new(),
             centered: false,
         }
     }
 
-    pub fn with_theme(mut self, theme: Theme) -> Self {
+    pub fn with_theme(mut self, theme: GrayTheme) -> Self {
         self.theme = theme;
         self
     }
@@ -296,7 +299,7 @@ impl Label {
     where
         D: DrawTarget<Color = Rgb565>,
     {
-        let style = MonoTextStyle::new(&FONT_10X20, self.theme.text);
+        let style = MonoTextStyle::new(&FONT_10X20, self.theme.text());
 
         let text = if self.centered {
             Text::with_baseline(
@@ -323,7 +326,7 @@ pub struct ProgressBar {
     pub value: i32,
     pub min: i32,
     pub max: i32,
-    pub theme: Theme,
+    pub theme: GrayTheme,
     pub id: u32,
     /// 上次绘制的填充宽度（用于脏矩形检测）
     pub last_fill_width: u32,
@@ -339,13 +342,13 @@ impl ProgressBar {
             value: 0,
             min: 0,
             max: 100,
-            theme: Theme::dark(),
+            theme: GrayTheme::new(),
             id,
             last_fill_width: 0,
         }
     }
 
-    pub fn with_theme(mut self, theme: Theme) -> Self {
+    pub fn with_theme(mut self, theme: GrayTheme) -> Self {
         self.theme = theme;
         self
     }
@@ -406,31 +409,31 @@ impl ProgressBar {
                 Point::new(self.x, self.y),
                 Size::new(self.width, self.height),
             ),
-            self.theme.background,
+            self.theme.background(),
         )?;
 
         // 边框 - 简化为填充
         display.fill_solid(
             &Rectangle::new(Point::new(self.x, self.y), Size::new(self.width, 1)),
-            self.theme.border,
+            self.theme.border(),
         )?;
         display.fill_solid(
             &Rectangle::new(
                 Point::new(self.x, self.y + self.height as i32 - 1),
                 Size::new(self.width, 1),
             ),
-            self.theme.border,
+            self.theme.border(),
         )?;
         display.fill_solid(
             &Rectangle::new(Point::new(self.x, self.y), Size::new(1, self.height)),
-            self.theme.border,
+            self.theme.border(),
         )?;
         display.fill_solid(
             &Rectangle::new(
                 Point::new(self.x + self.width as i32 - 1, self.y),
                 Size::new(1, self.height),
             ),
-            self.theme.border,
+            self.theme.border(),
         )?;
 
         // 填充条 - 使用 fill_solid（DMA 友好）
@@ -444,7 +447,7 @@ impl ProgressBar {
                         self.height.saturating_sub(2),
                     ),
                 ),
-                self.theme.primary,
+                self.theme.g2, // 深灰 - 进度条填充
             )?;
         }
 
@@ -484,7 +487,7 @@ impl Widget {
 /// 屏幕/容器
 pub struct Screen {
     pub widgets: heapless::Vec<Widget, 8>,
-    pub theme: Theme,
+    pub theme: GrayTheme,
     pub width: u32,
     pub height: u32,
     /// 脏矩形列表（需要重绘的区域）
@@ -495,14 +498,14 @@ impl Screen {
     pub fn new(width: u32, height: u32) -> Self {
         Self {
             widgets: heapless::Vec::new(),
-            theme: Theme::dark(),
+            theme: GrayTheme::new(),
             width,
             height,
             dirty_rects: heapless::Vec::new(),
         }
     }
 
-    pub fn with_theme(mut self, theme: Theme) -> Self {
+    pub fn with_theme(mut self, theme: GrayTheme) -> Self {
         self.theme = theme;
         self
     }
@@ -562,7 +565,7 @@ impl Screen {
         // 清屏 - 使用 fill_solid 进行 DMA 优化的大面积填充
         display.fill_solid(
             &Rectangle::new(Point::new(0, 0), Size::new(self.width, self.height)),
-            self.theme.background,
+            self.theme.background(),
         )?;
 
         // 绘制所有控件
@@ -582,7 +585,7 @@ impl Screen {
     {
         for dirty in &self.dirty_rects {
             // 绘制该区域的背景
-            display.fill_solid(&dirty.to_rectangle(), self.theme.background)?;
+            display.fill_solid(&dirty.to_rectangle(), self.theme.background())?;
 
             // 绘制与该区域相交的控件
             for widget in &self.widgets {
@@ -624,7 +627,7 @@ impl Screen {
         display: &mut crate::display::DisplayDriver,
     ) -> Result<(), core::convert::Infallible> {
         // 清屏 - 使用帧缓冲
-        display.clear(self.theme.background);
+        display.clear(self.theme.background());
 
         // 绘制所有控件（绘制到帧缓冲）
         for widget in &self.widgets {
@@ -672,7 +675,7 @@ impl Screen {
                         embedded_graphics::geometry::Size::new(bb.width, bb.height),
                     )
                     .into_styled(embedded_graphics::primitives::PrimitiveStyle::with_fill(
-                        pb.theme.background,
+                        pb.theme.background(),
                     ))
                     .draw(display)?;
 
