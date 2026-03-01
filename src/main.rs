@@ -2,19 +2,19 @@
 #![no_main]
 
 mod display;
+mod profiler;
+mod serial;
 mod ui;
 
-use cortex_m::peripheral::DWT;
 use cortex_m_rt::entry;
-use nb::block;
 use panic_halt as _;
 use stm32h7xx_hal::pac;
 use stm32h7xx_hal::prelude::*;
 use stm32h7xx_hal::spi;
 
-use display::{DisplayDriver, init_frame_buffer};
-use embedded_graphics::prelude::*;
+use display::{init_frame_buffer, DisplayDriver};
 use embedded_graphics::pixelcolor::Rgb565;
+use embedded_graphics::prelude::*;
 
 use ui::{Button, Label, ProgressBar, Screen, Theme};
 
@@ -27,68 +27,9 @@ fn delay_ms(ms: u32) {
     }
 }
 
-// 宏：写入字符串到串口
-macro_rules! write_str {
-    ($tx:expr, $s:expr) => {
-        for b in $s.bytes() {
-            let _ = block!($tx.write(b));
-        }
-    };
-}
-
-// 宏：写入数字到串口
-macro_rules! write_num {
-    ($tx:expr, $n:expr) => {{
-        let mut n = $n;
-        let mut buf = [0u8; 12];
-        let mut i = 0;
-        if n == 0 {
-            buf[i] = b'0';
-            i = 1;
-        } else {
-            let mut temp = n;
-            let mut len = 0;
-            while temp > 0 {
-                len += 1;
-                temp /= 10;
-            }
-            i = len;
-            while n > 0 {
-                i -= 1;
-                buf[i] = b'0' + (n % 10) as u8;
-                n /= 10;
-            }
-            i = len;
-        }
-        for j in 0..i {
-            let _ = block!($tx.write(buf[j]));
-        }
-    }};
-}
-
-// 宏：测量并输出耗时
-macro_rules! measure_time {
-    ($tx:expr, $name:expr, $operation:block) => {
-        {
-            let start = DWT::cycle_count();
-            $operation
-            let end = DWT::cycle_count();
-            let cycles = end.wrapping_sub(start);
-            let time_us = cycles / 400; // 400MHz = 400 cycles/us
-            write_str!($tx, $name);
-            write_str!($tx, " took: ");
-            write_num!($tx, time_us / 1000);
-            write_str!($tx, ".");
-            write_num!($tx, (time_us % 1000) / 100);
-            write_str!($tx, " ms\r\n");
-            time_us
-        }
-    };
-}
 
 #[entry]
 fn main() -> ! {
-    let cp = cortex_m::Peripherals::take().unwrap();
     let dp = pac::Peripherals::take().unwrap();
 
     let pwr = dp.PWR.constrain();
@@ -99,10 +40,6 @@ fn main() -> ! {
         .sys_ck(400.MHz())
         .pll1_q_ck(400.MHz())
         .freeze(pwrcfg, &dp.SYSCFG);
-
-    // 启用 DWT 周期计数器
-    let mut dwt = cp.DWT;
-    dwt.enable_cycle_counter();
 
     let gpioa = dp.GPIOA.split(ccdr.peripheral.GPIOA);
     let gpiob = dp.GPIOB.split(ccdr.peripheral.GPIOB);
@@ -135,15 +72,6 @@ fn main() -> ! {
     // 打开背光
     let _ = disp_blk.set_high();
 
-    // USART1 (PA9/PA10)
-    let tx = gpioa.pa9.into_alternate::<7>();
-    let rx = gpioa.pa10.into_alternate::<7>();
-    let serial = dp
-        .USART1
-        .serial((tx, rx), 9600.bps(), ccdr.peripheral.USART1, &ccdr.clocks)
-        .unwrap();
-    let (mut tx, _) = serial.split();
-
     // 初始化 SPI2
     let spi = dp.SPI2.spi(
         (disp_sck, disp_miso, disp_mosi),
@@ -152,27 +80,17 @@ fn main() -> ! {
         ccdr.peripheral.SPI2,
         &ccdr.clocks,
     );
-    write_str!(tx, "SPI2 initialized at 80MHz!\r\n");
 
     // 初始化帧缓冲
     init_frame_buffer();
-    write_str!(tx, "Frame buffer initialized!\r\n");
 
     // 初始化屏幕
     let mut display = DisplayDriver::new(spi, disp_cs, disp_dc);
-    write_str!(tx, "Display init...\r\n");
     display.init(&mut delay_ms);
-    write_str!(tx, "Display initialized!\r\n");
 
     // 使用 DMA 清屏（黑色背景）
-    write_str!(tx, "Clearing screen with DMA...\r\n");
-    measure_time!(tx, "Clear screen (DMA)", {
-        display.clear(Rgb565::BLACK).unwrap();
-        display.flush();
-    });
-
-    write_str!(tx, "\r\n=== STM32H750 UI Demo with DMA ===\r\n");
-    write_str!(tx, "Creating UI screen...\r\n");
+    display.clear(Rgb565::BLACK).unwrap();
+    display.flush();
 
     // 创建 UI 屏幕（240x320）
     let screen = Screen::new(240, 320).with_theme(Theme::dark());
@@ -197,15 +115,8 @@ fn main() -> ! {
     let status = Label::new(120, 180, "Status: DMA Ready").centered();
     let _ = screen.add_label(status);
 
-    write_str!(tx, "UI screen created!\r\n");
-
-    // 测量初始绘制耗时（使用 DMA 批量传输）
-    measure_time!(tx, "Initial full screen draw with DMA", {
-        screen.draw_with_dma(&mut display).unwrap();
-    });
-
-    write_str!(tx, "\r\n=== Benchmark End ===\r\n\r\n");
-    write_str!(tx, "Starting main loop...\r\n");
+    // 初始绘制（使用 DMA 批量传输）
+    screen.draw_with_dma(&mut display).unwrap();
 
     // 动画状态
     let mut anim_value: i32 = 0;
@@ -234,9 +145,7 @@ fn main() -> ! {
             }
             last_val1 = anim_value;
             // 使用 DMA 更新进度条
-            measure_time!(tx, "Progress bar update (DMA)", {
-                let _ = screen.update_progress_bar_with_dma(&mut display, 1);
-            });
+            let _ = screen.update_progress_bar_with_dma(&mut display, 1);
         }
 
         frame_count += 1;
@@ -246,6 +155,6 @@ fn main() -> ! {
             let _ = led.toggle();
         }
 
-        delay_ms(100); // 约 10fps
+        delay_ms(16); // 约 10fps
     }
 }
