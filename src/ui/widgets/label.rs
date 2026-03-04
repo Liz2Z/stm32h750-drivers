@@ -10,6 +10,7 @@ use embedded_graphics::{
 };
 
 /// 标签控件
+#[derive(Clone, Copy)]
 pub struct Label {
     pub x: i32,
     pub y: i32,
