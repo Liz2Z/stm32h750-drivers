@@ -10,7 +10,8 @@ use embedded_graphics::{
     text::{Baseline, Text},
 };
 
-/// 温湿度显示卡片（130x120）
+/// 温湿度显示卡片（145x120）
+#[derive(Clone, Copy)]
 pub struct TempHumidCard {
     pub x: i32,
     pub y: i32,
@@ -18,16 +19,15 @@ pub struct TempHumidCard {
     pub height: u32,
     pub sensor: TempHumidSensor,
     pub theme: GrayTheme,
-    pub show_temp: bool, // true=显示温度, false=显示湿度
+    pub show_temp: bool,
 }
 
 impl TempHumidCard {
-    /// 创建新的温湿度卡片
     pub fn new(x: i32, y: i32, show_temp: bool) -> Self {
         Self {
             x,
             y,
-            width: 130,
+            width: 145,
             height: 120,
             sensor: TempHumidSensor::new(),
             theme: GrayTheme::new(),

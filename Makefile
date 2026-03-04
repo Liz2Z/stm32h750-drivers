@@ -6,10 +6,6 @@ all:
 bin: all
 	rust-objcopy -O binary target/thumbv7em-none-eabihf/release/rfid-stm32h750 target/thumbv7em-none-eabihf/release/rfid-stm32h750.bin
 
-# 使用 st-flash 烧录
-flash: bin
-	st-flash --connect-under-reset write target/thumbv7em-none-eabihf/release/rfid-stm32h750.bin 0x08000000
-
 # 使用 OpenOCD 烧录
 flash-openocd: bin
 	openocd -f interface/stlink.cfg -f target/stm32h7x.cfg \

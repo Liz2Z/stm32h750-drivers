@@ -11,6 +11,7 @@ use embedded_graphics::{
 };
 
 /// 历史记录条（280x60）
+#[derive(Clone, Copy)]
 pub struct HistoryBar {
     pub x: i32,
     pub y: i32,

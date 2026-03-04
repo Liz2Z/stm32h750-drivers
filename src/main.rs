@@ -2,6 +2,7 @@
 #![no_main]
 
 mod adc_ntc;
+mod dht11;
 mod display;
 mod profiler;
 mod serial;
@@ -13,11 +14,12 @@ use stm32h7xx_hal::pac;
 use stm32h7xx_hal::prelude::*;
 use stm32h7xx_hal::spi;
 
-use display::{init_frame_buffer, DisplayDriver};
+use display::{init_frame_buffer, DisplayDriver, DisplayOrientation};
+use dht11::Dht11;
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
 
-use ui::{GrayTheme, HistoryBar, Label, Screen, TempHumidCard};
+use ui::{GrayTheme, Label, Screen, TempHumidCard, TempHumidSensor};
 
 // 延时函数
 fn delay_ms(ms: u32) {
@@ -45,6 +47,12 @@ fn main() -> ! {
     let gpioa = dp.GPIOA.split(ccdr.peripheral.GPIOA);
     let gpiob = dp.GPIOB.split(ccdr.peripheral.GPIOB);
     let mut led = gpioa.pa1.into_push_pull_output();
+
+    let dht_pin = gpioa.pa2.into_open_drain_output();
+
+    let mut dht11 = Dht11::new(dht_pin);
+
+    delay_ms(2000);
 
     // 屏幕引脚配置
     let mut disp_blk = gpiob.pb0.into_push_pull_output();
@@ -89,54 +97,64 @@ fn main() -> ! {
     let mut display = DisplayDriver::new(spi, disp_cs, disp_dc);
     display.init(&mut delay_ms);
 
+    // 设置横屏模式
+    display.set_orientation(DisplayOrientation::Landscape);
+
     // 使用 DMA 清屏（白色背景）
     display.clear(Rgb565::WHITE).unwrap();
     display.flush();
 
-    // 创建 UI 屏幕（320x240）
-    let screen = Screen::new(320, 240).with_theme(GrayTheme::new());
+    // 创建 UI 屏幕（根据当前方向动态获取尺寸）
+    let screen = Screen::new(display.width() as u32, display.height() as u32).with_theme(GrayTheme::new());
     let mut screen = screen;
 
     // ===== 温湿度传感器测试场景 =====
 
-    // 1. 创建温度卡片
-    let mut temp_card = TempHumidCard::new(20, 40, true); // show_temp = true
-    temp_card.sensor.update_temp(25.5);
-    temp_card.sensor.temp_high = 28.0;
-    temp_card.sensor.temp_low = 22.0;
-    let _ = screen.add_temp_humd_card(temp_card);
+    let mut temp_sensor = TempHumidSensor::new();
+    let mut humid_sensor = TempHumidSensor::new();
 
-    // 2. 创建湿度卡片
-    let mut humid_card = TempHumidCard::new(170, 40, false); // show_temp = false
-    humid_card.sensor.update_humid(60.0);
-    humid_card.sensor.humid_high = 65.0;
-    humid_card.sensor.humid_low = 55.0;
-    let _ = screen.add_temp_humd_card(humid_card);
+    let _ = screen.add_temp_humd_card(TempHumidCard::new(15, 50, true));
+    let _ = screen.add_temp_humd_card(TempHumidCard::new(170, 50, false));
+    let _ = screen.add_label(Label::new(160, 15, "DHT11 MONITOR").centered());
 
-    // 3. 创建历史记录条
-    let mut history = HistoryBar::new(20, 180);
-    history.update(&[24.0, 23.0, 25.0, 26.0, 25.5, 25.0]);
-    let _ = screen.add_history_bar(history);
-
-    // 4. 添加标题
-    let title = Label::new(160, 10, "TEMP/HUMID DASHBOARD").centered();
-    let _ = screen.add_label(title);
-
-    // 初始绘制（使用 DMA 批量传输）
     screen.draw_with_dma(&mut display).unwrap();
 
-    // 动画状态
     let mut frame_count: u32 = 0;
+    let mut last_dht_read: u32 = 0;
 
-    // 主循环
     loop {
         frame_count += 1;
 
-        // LED 慢闪表示运行中
+        if frame_count - last_dht_read > 300 {
+            last_dht_read = frame_count;
+
+            match dht11.read() {
+                Ok(reading) => {
+                    let _ = led.toggle();
+
+                    temp_sensor.update_temp(reading.temperature);
+                    humid_sensor.update_humid(reading.humidity);
+
+                    let mut temp_card = TempHumidCard::new(15, 50, true);
+                    temp_card.sensor = temp_sensor;
+                    let mut humid_card = TempHumidCard::new(170, 50, false);
+                    humid_card.sensor = humid_sensor;
+
+                    screen.widgets.clear();
+                    let _ = screen.add_temp_humd_card(temp_card);
+                    let _ = screen.add_temp_humd_card(humid_card);
+                    let _ = screen.add_label(Label::new(160, 15, "DHT11 MONITOR").centered());
+                    let _ = screen.draw_with_dma(&mut display);
+                }
+                Err(_) => {
+                }
+            }
+        }
+
         if frame_count % 60 == 0 {
             let _ = led.toggle();
         }
 
-        delay_ms(16); // 约 60fps
+        delay_ms(16);
     }
 }
