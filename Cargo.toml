@@ -15,7 +15,7 @@ exclude = [".vscode", ".claude", "docs/*.pdf"]
 stm32h7xx-hal = { version = "0.16", features = ["stm32h750v", "rt"] }
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7"
-embedded-graphics = "0.7"
+embedded-graphics = "0.8"
 embedded-hal = "0.2"
 panic-halt = "1.0"
 nb = "1.0"
