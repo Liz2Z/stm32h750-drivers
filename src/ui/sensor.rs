@@ -96,3 +96,68 @@ impl TempHumidSensor {
         }
     }
 }
+
+/// 气压传感器数据
+#[derive(Clone, Copy, Default)]
+pub struct PressureSensor {
+    /// 当前气压 (hPa)
+    pub pressure_current: f32,
+    /// 最高气压 (hPa)
+    pub pressure_high: f32,
+    /// 最低气压 (hPa)
+    pub pressure_low: f32,
+    /// 历史记录（最多 6 次）
+    pub history: [f32; 6],
+    /// 历史记录计数
+    pub history_count: usize,
+}
+
+impl PressureSensor {
+    /// 创建新的气压传感器数据
+    pub fn new() -> Self {
+        Self {
+            pressure_current: 0.0,
+            pressure_high: 0.0,
+            pressure_low: 0.0,
+            history: [0.0; 6],
+            history_count: 0,
+        }
+    }
+
+    /// 更新气压数据
+    pub fn update(&mut self, pressure: f32) {
+        self.pressure_current = pressure;
+        if pressure > self.pressure_high || self.pressure_high == 0.0 {
+            self.pressure_high = pressure;
+        }
+        if pressure < self.pressure_low || self.pressure_low == 0.0 {
+            self.pressure_low = pressure;
+        }
+        self.add_history(pressure);
+    }
+
+    /// 添加历史记录
+    fn add_history(&mut self, value: f32) {
+        if self.history_count < 6 {
+            self.history[self.history_count] = value;
+            self.history_count += 1;
+        } else {
+            // 滚动更新：移除最旧的，添加新的
+            for i in 0..5 {
+                self.history[i] = self.history[i + 1];
+            }
+            self.history[5] = value;
+        }
+    }
+
+    /// 格式化气压字符串
+    pub fn pressure_str(&self) -> heapless::String<16> {
+        use core::fmt::Write;
+        let mut s = heapless::String::new();
+        if write!(s, "{:.0}hPa", self.pressure_current).is_ok() {
+            s
+        } else {
+            heapless::String::from("----hPa")
+        }
+    }
+}

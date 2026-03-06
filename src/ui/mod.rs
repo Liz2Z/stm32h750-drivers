@@ -19,6 +19,6 @@ mod widgets;
 pub use bounding_box::BoundingBox;
 pub use icons::PixelIcon;
 pub use screen::Screen;
-pub use sensor::TempHumidSensor;
+pub use sensor::{PressureSensor, TempHumidSensor};
 pub use theme::GrayTheme;
-pub use widgets::{Button, HistoryBar, Label, ProgressBar, TempHumidCard, Widget};
+pub use widgets::{Button, HistoryBar, Label, PressureCard, ProgressBar, TempHumidCard, Widget};
