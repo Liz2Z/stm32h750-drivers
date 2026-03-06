@@ -78,10 +78,10 @@ impl TempHumidSensor {
     pub fn temp_str(&self) -> heapless::String<16> {
         use core::fmt::Write;
         let mut s = heapless::String::new();
-        if write!(s, "{:.1}°C", self.temp_current).is_ok() {
+        if write!(s, "{:.1}C", self.temp_current).is_ok() {
             s
         } else {
-            heapless::String::from("--.-°C")
+            heapless::String::from("--.-C")
         }
     }
 

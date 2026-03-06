@@ -136,12 +136,12 @@ impl TempHumidCard {
             (
                 {
                     let mut s = heapless::String::<16>::new();
-                    let _ = write!(s, "hi:{:.0}°C", self.sensor.temp_high);
+                    let _ = write!(s, "hi:{:.0}C", self.sensor.temp_high);
                     s
                 },
                 {
                     let mut s = heapless::String::<16>::new();
-                    let _ = write!(s, "lo:{:.0}°C", self.sensor.temp_low);
+                    let _ = write!(s, "lo:{:.0}C", self.sensor.temp_low);
                     s
                 },
             )
