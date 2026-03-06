@@ -57,7 +57,7 @@ use drivers::{aht20, bmp280, display, DisplayDriver, DisplayOrientation};
 use embedded_graphics::pixelcolor::Rgb565;
 use embedded_graphics::prelude::*;
 
-use ui::{GrayTheme, Label, Screen, TempHumidCard, TempHumidSensor};
+use ui::{GrayTheme, Label, PressureCard, PressureSensor, Screen, TempHumidCard, TempHumidSensor};
 
 /// 软件延时函数
 ///
@@ -310,19 +310,23 @@ fn main() -> ! {
     // - 历史最低值
     let mut temp_sensor = TempHumidSensor::new();
     let mut humid_sensor = TempHumidSensor::new();
+    let mut pressure_sensor = PressureSensor::new();
 
-    // 添加温度卡片（左侧）
-    let temp_card = TempHumidCard::new(15, 50, true)
+    // 添加温度卡片（左列）
+    let temp_card = TempHumidCard::new(5, 20, true)
         .with_theme(GrayTheme::new());
     let _ = screen.add_temp_humd_card(temp_card);
 
-    // 添加湿度卡片（右侧）
-    let humid_card = TempHumidCard::new(170, 50, false)
+    // 添加湿度卡片（中列）
+    let humid_card = TempHumidCard::new(110, 20, false)
         .with_theme(GrayTheme::new());
     let _ = screen.add_temp_humd_card(humid_card);
 
-    // 添加标题
-    let _ = screen.add_label(Label::new(160, 15, "AHT20+BMP280").centered());
+    // 添加气压卡片（右列）
+    let pressure_card = PressureCard::new(215, 20)
+        .with_theme(GrayTheme::new());
+    let _ = screen.add_pressure_card(pressure_card);
+
 
     // 绘制初始界面
     screen.draw_with_dma(&mut display).unwrap();
@@ -407,23 +411,47 @@ fn main() -> ! {
                     temp_sensor.update_temp(reading.temperature);
                     humid_sensor.update_humid(reading.humidity);
 
+                    // 释放 I2C 并读取 BMP280
+                    let i2c = aht20.release();
+                    let mut bmp280 = bmp280::Bmp280::new(i2c);
+                    
+                    // 读取 BMP280 气压
+                    match bmp280.read() {
+                        Ok(bmp_reading) => {
+                            // 更新气压数据
+                            pressure_sensor.update(bmp_reading.pressure);
+                        }
+                        Err(_) => {
+                            // BMP280 读取失败，保持上次的值
+                        }
+                    }
+
+                    // 释放 I2C 并重新创建 AHT20 实例
+                    let i2c = bmp280.release();
+                    aht20 = aht20::Aht20::new(i2c);
+
                     // 更新屏幕显示：先清空控件，然后重新添加带新数据的卡片
                     screen.widgets.clear();
                     
-                    // 创建带新数据的卡片
-                    let temp_card = TempHumidCard::new(15, 50, true)
+                    // 创建带新数据的卡片（3列布局）
+                    let temp_card = TempHumidCard::new(5, 20, true)
                         .with_theme(GrayTheme::new());
                     let mut temp_card_with_data = temp_card;
                     temp_card_with_data.sensor = temp_sensor;
                     
-                    let humid_card = TempHumidCard::new(170, 50, false)
+                    let humid_card = TempHumidCard::new(110, 20, false)
                         .with_theme(GrayTheme::new());
                     let mut humid_card_with_data = humid_card;
                     humid_card_with_data.sensor = humid_sensor;
                     
+                    let pressure_card = PressureCard::new(215, 20)
+                        .with_theme(GrayTheme::new());
+                    let mut pressure_card_with_data = pressure_card;
+                    pressure_card_with_data.sensor = pressure_sensor;
+                    
                     let _ = screen.add_temp_humd_card(temp_card_with_data);
                     let _ = screen.add_temp_humd_card(humid_card_with_data);
-                    let _ = screen.add_label(Label::new(160, 15, "AHT20+BMP280").centered());
+                    let _ = screen.add_pressure_card(pressure_card_with_data);
                     let _ = screen.draw_with_dma(&mut display);
                 }
                 Err(e) => {

@@ -47,6 +47,10 @@ impl Screen {
         self.widgets.push(Widget::TempHumidCard(card)).map_err(|_| ())
     }
 
+    pub fn add_pressure_card(&mut self, card: super::PressureCard) -> Result<(), ()> {
+        self.widgets.push(Widget::PressureCard(card)).map_err(|_| ())
+    }
+
     pub fn add_history_bar(&mut self, bar: super::HistoryBar) -> Result<(), ()> {
         self.widgets.push(Widget::HistoryBar(bar)).map_err(|_| ())
     }

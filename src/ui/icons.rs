@@ -1,4 +1,4 @@
-//! 8x8 像素图标
+//! 16x16 像素图标
 
 use embedded_graphics::{
     pixelcolor::Rgb565,
@@ -6,7 +6,7 @@ use embedded_graphics::{
     primitives::Rectangle,
 };
 
-/// 8x8 像素图标
+/// 16x16 像素图标
 #[derive(Clone, Copy)]
 pub enum PixelIcon {
     Thermo,   // 温度计 🌡
@@ -16,8 +16,8 @@ pub enum PixelIcon {
 }
 
 impl PixelIcon {
-    /// 获取 8x8 像素数据（每个 bit 代表一个像素）
-    pub fn data(&self) -> &[u8; 8] {
+    /// 获取 16x16 像素数据
+    pub fn data(&self) -> &[u8; 32] {
         match self {
             Self::Thermo => &THERMO_ICON,
             Self::Humid => &HUMID_ICON,
@@ -27,9 +27,6 @@ impl PixelIcon {
     }
 
     /// 绘制图标到显示设备
-    ///
-    /// x, y: 左上角坐标
-    /// scale: 缩放倍数（1=原始8x8, 2=16x16）
     pub fn draw<D>(
         &self,
         display: &mut D,
@@ -44,9 +41,11 @@ impl PixelIcon {
         let data = self.data();
         let pixel_size = Size::new(scale, scale);
 
-        for row in 0..8 {
-            for col in 0..8 {
-                if (data[row] >> (7 - col)) & 1 == 1 {
+        for row in 0..16 {
+            let row_data = ((data[row * 2] as u16) << 8) | (data[row * 2 + 1] as u16);
+
+            for col in 0..16 {
+                if (row_data >> (15 - col)) & 1 == 1 {
                     let px = x + col as i32 * scale as i32;
                     let py = y + row as i32 * scale as i32;
                     display.fill_solid(
@@ -60,47 +59,78 @@ impl PixelIcon {
     }
 }
 
-// 图标像素数据（8x8）
-const THERMO_ICON: [u8; 8] = [
-    0b00111100,  //   ██
-    0b01000010,  //  ██
-    0b01000010,  //  ██
-    0b00111100,  //   ██
-    0b00111100,  //   ██
-    0b00100100,  //   ▐▌
-    0b00100100,  //   ▐▌
-    0b00100100,  //   ▐▌
+const THERMO_ICON: [u8; 32] = [
+    0x03, 0xC0,
+    0x04, 0x20,
+    0x04, 0x20,
+    0x04, 0xA0,
+    0x04, 0xA0,
+    0x04, 0xA0,
+    0x04, 0xA0,
+    0x04, 0xA0,
+    0x08, 0x10,
+    0x11, 0x88,
+    0x13, 0xC8,
+    0x13, 0xC8,
+    0x11, 0x88,
+    0x08, 0x10,
+    0x07, 0xE0,
+    0x00, 0x00,
 ];
 
-const HUMID_ICON: [u8; 8] = [
-    0b00100100,  //   ▐▌
-    0b00100100,  //   ▐▌
-    0b00100100,  //   ▐▌
-    0b01111110,  //  █████
-    0b11111111,  // ███████
-    0b11111111,  // ███████
-    0b11111111,  // ███████
-    0b01101110,  //  ██ ██
+const HUMID_ICON: [u8; 32] = [
+    0x01, 0x80,
+    0x02, 0x40,
+    0x02, 0x40,
+    0x04, 0x20,
+    0x04, 0x20,
+    0x08, 0x10,
+    0x10, 0x08,
+    0x20, 0x04,
+    0x40, 0x02,
+    0x40, 0xC2,
+    0x42, 0x02,
+    0x20, 0x04,
+    0x10, 0x08,
+    0x0F, 0xF0,
+    0x00, 0x00,
+    0x00, 0x00,
 ];
 
-const HOME_ICON: [u8; 8] = [
-    0b00011000,  //    ██
-    0b00111100,  //   ████
-    0b01111110,  //  ██████
-    0b11111111,  // ███████
-    0b10011001,  // ██  ██
-    0b10011001,  // ██  ██
-    0b10011001,  // ██  ██
-    0b10000001,  // ██    ██
+const HOME_ICON: [u8; 32] = [
+    0x01, 0x80,
+    0x02, 0x40,
+    0x04, 0x20,
+    0x08, 0x10,
+    0x10, 0x08,
+    0x20, 0x04,
+    0x7F, 0xFE,
+    0x08, 0x10,
+    0x08, 0x10,
+    0x0B, 0xD0,
+    0x0A, 0x50,
+    0x0A, 0x50,
+    0x0A, 0xD0,
+    0x0A, 0x50,
+    0x0F, 0xF0,
+    0x00, 0x00,
 ];
 
-const SETTINGS_ICON: [u8; 8] = [
-    0b00100100,  //   ▐▌
-    0b01111110,  //  █████
-    0b11111111,  // ███████
-    0b11111111,  // ███████
-    0b00111100,  //   ████
-    0b00100100,  //   ▐▌
-    0b00100100,  //   ▐▌
-    0b00100100,  //   ▐▌
+const SETTINGS_ICON: [u8; 32] = [
+    0x01, 0x80,
+    0x02, 0x40,
+    0x38, 0x1C,
+    0x40, 0x02,
+    0x43, 0xC2,
+    0x84, 0x21,
+    0x88, 0x11,
+    0x88, 0x11,
+    0x88, 0x11,
+    0x88, 0x11,
+    0x84, 0x21,
+    0x43, 0xC2,
+    0x40, 0x02,
+    0x38, 0x1C,
+    0x02, 0x40,
+    0x01, 0x80,
 ];

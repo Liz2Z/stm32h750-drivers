@@ -1,7 +1,7 @@
-//! 温湿度显示卡片
+//! 气压显示卡片
 
 use super::BoundingBox;
-use crate::ui::{GrayTheme, PixelIcon, TempHumidSensor};
+use crate::ui::{GrayTheme, PressureSensor};
 use embedded_graphics::{
     mono_font::{ascii::FONT_10X20, MonoTextStyle},
     pixelcolor::Rgb565,
@@ -10,28 +10,26 @@ use embedded_graphics::{
     text::{Baseline, Text},
 };
 
-/// 温湿度显示卡片（100x200）
+/// 气压显示卡片（100x200）
 #[derive(Clone, Copy)]
-pub struct TempHumidCard {
+pub struct PressureCard {
     pub x: i32,
     pub y: i32,
     pub width: u32,
     pub height: u32,
-    pub sensor: TempHumidSensor,
+    pub sensor: PressureSensor,
     pub theme: GrayTheme,
-    pub show_temp: bool,
 }
 
-impl TempHumidCard {
-    pub fn new(x: i32, y: i32, show_temp: bool) -> Self {
+impl PressureCard {
+    pub fn new(x: i32, y: i32) -> Self {
         Self {
             x,
             y,
             width: 100,
             height: 200,
-            sensor: TempHumidSensor::new(),
+            sensor: PressureSensor::new(),
             theme: GrayTheme::new(),
-            show_temp,
         }
     }
 
@@ -42,7 +40,7 @@ impl TempHumidCard {
     }
 
     /// 更新传感器数据
-    pub fn update(&mut self, data: TempHumidSensor) {
+    pub fn update(&mut self, data: PressureSensor) {
         self.sensor = data;
     }
 
@@ -90,7 +88,7 @@ impl TempHumidCard {
         )?;
 
         // 3. 绘制标题
-        let title = if self.show_temp { "THERMO" } else { "HUMID" };
+        let title = "PRESS";
         let style = MonoTextStyle::new(&FONT_10X20, self.theme.g0);
         let text = Text::with_baseline(
             title,
@@ -103,22 +101,19 @@ impl TempHumidCard {
         );
         text.draw(display)?;
 
-        // 4. 绘制图标（居中，16x16 放大）
-        let icon = if self.show_temp {
-            PixelIcon::Thermo
-        } else {
-            PixelIcon::Humid
-        };
-        let icon_x = self.x + self.width as i32 / 2 - 8;
-        let icon_y = self.y + 35;
-        icon.draw(display, icon_x, icon_y, 2, self.theme.g0)?;
+        // 4. 绘制气压图标（使用简单的文字代替）
+        let icon_text = "P";
+        let icon_style = MonoTextStyle::new(&FONT_10X20, self.theme.g0);
+        let icon = Text::with_baseline(
+            icon_text,
+            Point::new(self.x + self.width as i32 / 2 - 5, self.y + 35),
+            icon_style,
+            Baseline::Top,
+        );
+        icon.draw(display)?;
 
-        // 5. 绘制当前数值
-        let value_str = if self.show_temp {
-            self.sensor.temp_str()
-        } else {
-            self.sensor.humid_str()
-        };
+        // 5. 绘制当前气压值
+        let value_str = self.sensor.pressure_str();
         let value_text = Text::with_baseline(
             &value_str,
             Point::new(
@@ -132,32 +127,15 @@ impl TempHumidCard {
 
         // 6. 绘制最高/最低值
         use core::fmt::Write;
-        let (high, low) = if self.show_temp {
-            (
-                {
-                    let mut s = heapless::String::<16>::new();
-                    let _ = write!(s, "hi:{:.0}C", self.sensor.temp_high);
-                    s
-                },
-                {
-                    let mut s = heapless::String::<16>::new();
-                    let _ = write!(s, "lo:{:.0}C", self.sensor.temp_low);
-                    s
-                },
-            )
-        } else {
-            (
-                {
-                    let mut s = heapless::String::<16>::new();
-                    let _ = write!(s, "hi:{}%", self.sensor.humid_high as i32);
-                    s
-                },
-                {
-                    let mut s = heapless::String::<16>::new();
-                    let _ = write!(s, "lo:{}%", self.sensor.humid_low as i32);
-                    s
-                },
-            )
+        let high = {
+            let mut s = heapless::String::<16>::new();
+            let _ = write!(s, "hi:{:.0}", self.sensor.pressure_high);
+            s
+        };
+        let low = {
+            let mut s = heapless::String::<16>::new();
+            let _ = write!(s, "lo:{:.0}", self.sensor.pressure_low);
+            s
         };
 
         let high_text = Text::with_baseline(
