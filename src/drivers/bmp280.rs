@@ -76,7 +76,7 @@ struct CalibrationData {
 }
 
 pub struct Bmp280<I2C> {
-    i2c: I2C,
+    i2c: Option<I2C>,
     addr: u8,
     calibration: CalibrationData,
     t_fine: i32,
@@ -89,7 +89,7 @@ where
 {
     pub fn new(i2c: I2C) -> Self {
         Self {
-            i2c,
+            i2c: Some(i2c),
             addr: 0x76,
             calibration: CalibrationData {
                 dig_t1: 0,
@@ -129,7 +129,7 @@ where
     fn detect_device(&mut self) -> Result<bool, Bmp280Error> {
         for addr in [BMP280_ADDR_LOW, BMP280_ADDR_HIGH] {
             let mut buf = [0u8; 1];
-            if self.i2c.write_read(addr, &[REG_ID], &mut buf).is_ok() && buf[0] == BMP280_ID {
+            if self.i2c.as_mut().unwrap().write_read(addr, &[REG_ID], &mut buf).is_ok() && buf[0] == BMP280_ID {
                 self.addr = addr;
                 return Ok(true);
             }
@@ -138,7 +138,7 @@ where
     }
 
     fn soft_reset(&mut self) -> Result<(), Bmp280Error> {
-        self.i2c
+        self.i2c.as_mut().unwrap()
             .write(self.addr, &[REG_RESET, 0xB6])
             .map_err(|_| Bmp280Error::I2cError)?;
 
@@ -147,7 +147,7 @@ where
 
     fn read_calibration_data(&mut self) -> Result<(), Bmp280Error> {
         let mut buf = [0u8; 24];
-        self.i2c
+        self.i2c.as_mut().unwrap()
             .write_read(self.addr, &[REG_CALIBRATION], &mut buf)
             .map_err(|_| Bmp280Error::I2cError)?;
 
@@ -170,12 +170,12 @@ where
 
     fn configure(&mut self) -> Result<(), Bmp280Error> {
         let config = (STANDBY_125MS << 5) | (FILTER_4 << 2);
-        self.i2c
+        self.i2c.as_mut().unwrap()
             .write(self.addr, &[REG_CONFIG, config])
             .map_err(|_| Bmp280Error::I2cError)?;
 
         let ctrl_meas = (OVERSAMPLING_16X << 5) | (OVERSAMPLING_16X << 2) | MODE_NORMAL;
-        self.i2c
+        self.i2c.as_mut().unwrap()
             .write(self.addr, &[REG_CTRL_MEAS, ctrl_meas])
             .map_err(|_| Bmp280Error::I2cError)?;
 
@@ -188,7 +188,7 @@ where
         }
 
         let mut buf = [0u8; 6];
-        self.i2c
+        self.i2c.as_mut().unwrap()
             .write_read(self.addr, &[REG_PRESSURE_MSB], &mut buf)
             .map_err(|_| Bmp280Error::I2cError)?;
 
@@ -245,7 +245,11 @@ where
         cortex_m::asm::delay(ms * 400_000);
     }
 
-    pub fn release(self) -> I2C {
-        self.i2c
+    pub fn release(&mut self) -> I2C {
+        self.i2c.take().expect("I2C bus was not attached!")
+    }
+
+    pub fn attach(&mut self, i2c: I2C) {
+        self.i2c = Some(i2c);
     }
 }

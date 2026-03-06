@@ -1,7 +1,7 @@
 //! 气压显示卡片
 
 use super::BoundingBox;
-use crate::ui::{GrayTheme, PressureSensor};
+use crate::ui::{GrayTheme, PixelIcon, PressureSensor};
 use embedded_graphics::{
     mono_font::{ascii::FONT_10X20, MonoTextStyle},
     pixelcolor::Rgb565,
@@ -101,16 +101,8 @@ impl PressureCard {
         );
         text.draw(display)?;
 
-        // 4. 绘制气压图标（使用简单的文字代替）
-        let icon_text = "P";
-        let icon_style = MonoTextStyle::new(&FONT_10X20, self.theme.g0);
-        let icon = Text::with_baseline(
-            icon_text,
-            Point::new(self.x + self.width as i32 / 2 - 5, self.y + 35),
-            icon_style,
-            Baseline::Top,
-        );
-        icon.draw(display)?;
+        // 4. 绘制气压图标（32x32）
+        PixelIcon::Barometer.draw(display, self.x + self.width as i32 / 2 - 16, self.y + 30, 2, self.theme.g0)?;
 
         // 5. 绘制当前气压值
         let value_str = self.sensor.pressure_str();

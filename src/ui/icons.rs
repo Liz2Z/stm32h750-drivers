@@ -9,10 +9,11 @@ use embedded_graphics::{
 /// 16x16 像素图标
 #[derive(Clone, Copy)]
 pub enum PixelIcon {
-    Thermo,   // 温度计 🌡
-    Humid,    // 湿度计 💧
-    Home,     // 主页 🏠
-    Settings, // 设置 ⚙
+    Thermo,    // 温度计 🌡
+    Humid,     // 湿度计 💧
+    Barometer, // 气压计 📊
+    Home,      // 主页 🏠
+    Settings,  // 设置 ⚙
 }
 
 impl PixelIcon {
@@ -21,6 +22,7 @@ impl PixelIcon {
         match self {
             Self::Thermo => &THERMO_ICON,
             Self::Humid => &HUMID_ICON,
+            Self::Barometer => &BAROMETER_ICON,
             Self::Home => &HOME_ICON,
             Self::Settings => &SETTINGS_ICON,
         }
@@ -95,6 +97,25 @@ const HUMID_ICON: [u8; 32] = [
     0x0F, 0xF0,
     0x00, 0x00,
     0x00, 0x00,
+];
+
+const BAROMETER_ICON: [u8; 32] = [
+    0x07, 0xE0,
+    0x18, 0x18,
+    0x21, 0x84,
+    0x44, 0x22,
+    0x40, 0x1A,
+    0x80, 0x11,
+    0x90, 0x29,
+    0x80, 0x41,
+    0x80, 0x81,
+    0x81, 0x81,
+    0x83, 0xC1,
+    0x41, 0x82,
+    0x40, 0x02,
+    0x20, 0x04,
+    0x18, 0x18,
+    0x07, 0xE0,
 ];
 
 const HOME_ICON: [u8; 32] = [
