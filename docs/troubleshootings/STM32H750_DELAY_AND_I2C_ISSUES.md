@@ -332,3 +332,178 @@ match aht20.init() {
    - 在屏幕上显示初始化和读取状态
 
 这些经验对于其他高性能 MCU（如 STM32H7 系列）和 I2C 传感器开发都有参考价值。
+
+---
+
+## 4. 多传感器共享 I2C 总线时结构体状态丢失（关键！）
+
+### 问题现象
+
+- AHT20 温湿度读取正常
+- BMP280 气压始终显示为 0 或不显示
+- BMP280 初始化成功，但读取时返回 `DeviceNotFound` 错误
+
+### 根本原因分析
+
+#### 错误代码
+
+```rust
+// 初始化阶段
+let mut bmp280 = bmp280::Bmp280::new(i2c);
+bmp280.init()?;  // 初始化成功，校准数据已缓存
+let i2c = bmp280.release();  // ❌ 销毁了 bmp280 实例！
+aht20 = aht20::Aht20::new(i2c);
+
+// 主循环
+loop {
+    match aht20.read() {
+        Ok(reading) => {
+            let i2c = aht20.release();
+            let mut bmp280 = bmp280::Bmp280::new(i2c);  // ❌ 重新创建实例
+            
+            match bmp280.read() {  // ❌ is_initialized = false，校准数据全为 0
+                // ...
+            }
+        }
+    }
+}
+```
+
+#### 问题分析
+
+**AHT20 为什么能行？**
+- `Aht20` 结构体内部**只有** `i2c` 这一个成员，没有任何缓存状态
+- 每次重新 `Aht20::new()` 创建实例，照样能直接发送读数指令并成功解析
+
+**BMP280 为什么不行？**
+- `Bmp280` 在 `init()` 时，不仅配置了硬件，**还在结构体内部缓存了重要的校准数据**
+- 校准数据包括：`dig_t1` ~ `dig_p9` 共 12 个参数，用于将原始 ADC 值转换为真实的温度和气压
+- `is_initialized` 标志位被设为 `true`
+
+当重新执行 `Bmp280::new(i2c)` 时：
+1. 创建了一个**全新**的 `Bmp280` 实例
+2. `is_initialized` 是默认的 `false`
+3. 所有校准参数全都是 `0`
+
+`read()` 方法中有以下判断：
+```rust
+if !self.is_initialized {
+    return Err(Bmp280Error::DeviceNotFound);  // 直接返回错误！
+}
+```
+
+即使去掉这个判断，由于校准参数全为 0，计算出来的气压也会是错误的值。
+
+### 正确实现
+
+#### 1. 修改 `bmp280.rs`：使用 `Option<I2C>` 包装
+
+```rust
+pub struct Bmp280<I2C> {
+    i2c: Option<I2C>,  // 使用 Option 包裹
+    addr: u8,
+    calibration: CalibrationData,  // 校准数据持久保存
+    t_fine: i32,
+    is_initialized: bool,  // 初始化标志持久保存
+}
+
+impl<I2C, E> Bmp280<I2C>
+where
+    I2C: Write<Error = E> + WriteRead<Error = E>,
+{
+    pub fn new(i2c: I2C) -> Self {
+        Self {
+            i2c: Some(i2c),
+            // ... 其他字段初始化
+        }
+    }
+
+    // 修改 release：取出 I2C 但不销毁实例
+    pub fn release(&mut self) -> I2C {
+        self.i2c.take().expect("I2C bus was not attached!")
+    }
+
+    // 新增 attach：重新挂载 I2C
+    pub fn attach(&mut self, i2c: I2C) {
+        self.i2c = Some(i2c);
+    }
+
+    // 所有 I2C 操作改为 self.i2c.as_mut().unwrap()
+    fn detect_device(&mut self) -> Result<bool, Bmp280Error> {
+        self.i2c.as_mut().unwrap().write_read(...)
+    }
+}
+```
+
+#### 2. 修改 `main.rs`：复用同一个实例
+
+```rust
+// 初始化阶段
+let mut bmp280 = bmp280::Bmp280::new(i2c);
+bmp280.init()?;
+let i2c = bmp280.release();  // 释放 I2C，但 bmp280 实例保留校准数据
+aht20 = aht20::Aht20::new(i2c);
+
+// 主循环
+loop {
+    match aht20.read() {
+        Ok(reading) => {
+            // 释放 AHT20 的 I2C，挂载到 bmp280
+            let i2c = aht20.release();
+            bmp280.attach(i2c);  // ✅ 复用已有实例，校准数据完整保留
+            
+            match bmp280.read() {  // ✅ is_initialized = true
+                Ok(bmp_reading) => {
+                    pressure_sensor.update(bmp_reading.pressure);
+                }
+                Err(_) => {}
+            }
+
+            // 释放 I2C，交还给 AHT20
+            let i2c = bmp280.release();
+            aht20 = aht20::Aht20::new(i2c);
+        }
+    }
+}
+```
+
+### 核心思路图解
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  主循环外：bmp280 实例一直存活，校准数据持久保存           │
+├─────────────────────────────────────────────────────────────┤
+│  主循环内：                                                │
+│    aht20.release() → bmp280.attach() → bmp280.read() →    │
+│    bmp280.release() → aht20 = Aht20::new()                │
+│                                                           │
+│  I2C 总线在两个传感器之间流转，但 bmp280 结构体状态不变    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 经验教训
+
+⚠️ **区分"物理硬件状态"和"软件结构体状态"！**
+
+| 对象 | 状态存储位置 | 重新创建的影响 |
+|------|------------|--------------|
+| 物理传感器 | 传感器内部寄存器 | 不受影响，硬件不会"失忆" |
+| 简单结构体（如 Aht20） | 只有 I2C 引用 | 重新创建无影响 |
+| 复杂结构体（如 Bmp280） | 校准数据、初始化标志 | **重新创建会丢失所有状态** |
+
+### 进阶建议
+
+在 Embedded Rust 中处理多个传感器共享同一个 I2C 总线，最标准的做法是引入 **`shared-bus`** 或 **`embedded-hal-bus`** crate：
+
+```rust
+use embedded_hal_bus::i2c::Sharing;
+
+let i2c_manager = embedded_hal_bus::i2c::SimpleDevice::new(i2c);
+
+let mut aht20 = Aht20::new(i2c_manager.acquire_i2c());
+let mut bmp280 = Bmp280::new(i2c_manager.acquire_i2c());
+
+// 两个传感器可以独立使用，无需手动 release/attach
+```
+
+这种方式更加优雅，避免了手动管理 I2C 所有权转移的复杂性。
