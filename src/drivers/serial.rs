@@ -16,6 +16,10 @@
 //! // 输出数字
 //! tx.write_num(12345);
 //! ```
+//!
+//! 注意：此模块主要用于 profiler 功能，在非 profiler 模式下可能未使用
+
+#![allow(dead_code)]
 
 use embedded_hal::serial::Write as HalWrite;
 
@@ -69,8 +73,8 @@ where
             i = len;
         }
 
-        for j in 0..i {
-            let _ = self.write_byte(buf[j]);
+        for &byte in buf.iter().take(i) {
+            let _ = self.write_byte(byte);
         }
     }
 

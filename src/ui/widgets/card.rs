@@ -1,4 +1,8 @@
 //! 温湿度显示卡片
+//!
+//! 注意：部分方法为预留功能，暂未在主程序中使用
+
+#![allow(dead_code)]
 
 use super::BoundingBox;
 use crate::ui::{GrayTheme, PixelIcon, TempHumidSensor};

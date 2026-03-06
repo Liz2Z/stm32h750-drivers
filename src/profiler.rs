@@ -36,6 +36,7 @@
 
 #![cfg_attr(not(feature = "profiler"), allow(dead_code))]
 
+#[cfg(feature = "profiler")]
 use cortex_m::peripheral::DWT;
 
 // 使用 serial 模块的 SerialTx

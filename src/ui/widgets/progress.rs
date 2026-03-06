@@ -1,12 +1,12 @@
 //! 进度条控件
+//!
+//! 注意：此控件为预留功能，暂未在主程序中使用
+
+#![allow(dead_code)]
 
 use super::BoundingBox;
 use crate::ui::GrayTheme;
-use embedded_graphics::{
-    pixelcolor::Rgb565,
-    prelude::*,
-    primitives::Rectangle,
-};
+use embedded_graphics::{pixelcolor::Rgb565, prelude::*, primitives::Rectangle};
 
 /// 进度条控件
 pub struct ProgressBar {

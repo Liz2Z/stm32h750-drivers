@@ -2,6 +2,10 @@
 //! NTC 热敏电阻温度传感器驱动模块
 //!
 //! 使用查表法将 ADC 值转换为温度
+//!
+//! 注意：此模块为预留功能，暂未在主程序中使用
+
+#![allow(dead_code)]
 
 use stm32h7xx_hal::gpio::{gpioa::PA3, Analog};
 

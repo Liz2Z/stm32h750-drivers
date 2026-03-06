@@ -40,14 +40,14 @@
 use core::mem::MaybeUninit;
 
 use embedded_hal::blocking::spi::Transfer as SpiTransfer;
-use stm32h7xx_hal::gpio::{PB12, PB1, Output, PushPull};
+use stm32h7xx_hal::gpio::{Output, PushPull, PB1, PB12};
 use stm32h7xx_hal::pac::SPI2;
-use stm32h7xx_hal::spi::{Spi, Enabled};
 use stm32h7xx_hal::spi::HalSpi;
+use stm32h7xx_hal::spi::{Enabled, Spi};
 
 use embedded_graphics::{
     draw_target::DrawTarget,
-    geometry::{OriginDimensions, Size, Point},
+    geometry::{OriginDimensions, Point, Size},
     pixelcolor::Rgb565,
     prelude::*,
     primitives::Rectangle,
@@ -79,21 +79,16 @@ pub const DMA_BUF_SIZE: usize = 8192;
 /// 屏幕可以横着放或竖着放，这个枚举让用户选择。
 /// 实际上是通过修改 ILI9341 的内存访问方向来实现的，
 /// 不需要物理旋转屏幕。
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum DisplayOrientation {
     /// 竖屏模式：240 宽 × 320 高
     /// 适合显示列表、长文本
+    #[allow(dead_code)]
     Portrait,
     /// 横屏模式：320 宽 × 240 高
     /// 适合并排显示多个数据卡片
+    #[default]
     Landscape,
-}
-
-impl Default for DisplayOrientation {
-    fn default() -> Self {
-        // 默认横屏，更适合温湿度监控界面
-        Self::Landscape
-    }
 }
 
 impl DisplayOrientation {
@@ -236,6 +231,7 @@ impl DisplayDriver {
     /// 创建带指定方向的显示驱动
     ///
     /// 如果知道要使用横屏或竖屏，可以用这个方法直接指定。
+    #[allow(dead_code)]
     pub fn with_orientation(
         spi: Spi<SPI2, Enabled, u8>,
         cs: PB12<Output<PushPull>>,
@@ -251,6 +247,7 @@ impl DisplayDriver {
     }
 
     /// 获取当前显示方向
+    #[allow(dead_code)]
     pub fn orientation(&self) -> DisplayOrientation {
         self.orientation
     }
@@ -280,8 +277,8 @@ impl DisplayDriver {
     /// - `delay_ms`: 延时函数，用于等待屏幕复位完成
     pub fn init(&mut self, delay_ms: &mut impl FnMut(u32)) {
         // 初始化引脚状态
-        let _ = self.cs.set_high();  // 取消选中
-        let _ = self.dc.set_high();   // 默认数据模式
+        self.cs.set_high(); // 取消选中
+        self.dc.set_high(); // 默认数据模式
 
         // 软件复位
         // 让屏幕重新初始化内部状态
@@ -308,10 +305,10 @@ impl DisplayDriver {
         // 电源控制
         // 这些参数影响显示质量和功耗
         self.write_command(commands::PWCTR1);
-        self.write_data(0x23);  // VRH[5:0]
-        self.write_data(0x10);  // VC[2:0]
+        self.write_data(0x23); // VRH[5:0]
+        self.write_data(0x10); // VC[2:0]
 
-        self.write_cmd_data(commands::PWCTR2, 0x10);  // BT[2:0]
+        self.write_cmd_data(commands::PWCTR2, 0x10); // BT[2:0]
 
         // VCOM 控制
         // 调整显示对比度
@@ -326,13 +323,15 @@ impl DisplayDriver {
         // 正极性伽马
         self.write_command(commands::GMCTRP1);
         self.write_data_bytes(&[
-            0x0F, 0x31, 0x2B, 0x0C, 0x0E, 0x08, 0x4E, 0xF1, 0x37, 0x07, 0x10, 0x03, 0x0E, 0x09, 0x00,
+            0x0F, 0x31, 0x2B, 0x0C, 0x0E, 0x08, 0x4E, 0xF1, 0x37, 0x07, 0x10, 0x03, 0x0E, 0x09,
+            0x00,
         ]);
 
         // 负极性伽马
         self.write_command(commands::GMCTRN1);
         self.write_data_bytes(&[
-            0x00, 0x0E, 0x14, 0x03, 0x11, 0x07, 0x31, 0xC1, 0x48, 0x08, 0x0F, 0x0C, 0x31, 0x36, 0x0F,
+            0x00, 0x0E, 0x14, 0x03, 0x11, 0x07, 0x31, 0xC1, 0x48, 0x08, 0x0F, 0x0C, 0x31, 0x36,
+            0x0F,
         ]);
 
         // 开启显示
@@ -346,7 +345,7 @@ impl DisplayDriver {
     /// 切换后需要重新绘制界面，因为帧缓冲的内容不会自动旋转。
     pub fn set_orientation(&mut self, orientation: DisplayOrientation) {
         if self.orientation == orientation {
-            return;  // 方向没变，无需操作
+            return; // 方向没变，无需操作
         }
 
         self.orientation = orientation;
@@ -360,11 +359,11 @@ impl DisplayDriver {
     /// 命令用于配置屏幕参数，不包含实际的像素数据。
     /// 通过拉低 DC 引脚告诉屏幕"接下来是命令"。
     fn write_command(&mut self, cmd: u8) {
-        let _ = self.cs.set_low();   // 选中屏幕
-        let _ = self.dc.set_low();   // DC=低 = 命令模式
+        self.cs.set_low(); // 选中屏幕
+        self.dc.set_low(); // DC=低 = 命令模式
         let mut buf = [cmd];
         let _ = self.spi.as_mut().unwrap().transfer(&mut buf);
-        let _ = self.cs.set_high();  // 取消选中
+        self.cs.set_high(); // 取消选中
     }
 
     /// 发送单个数据字节
@@ -372,11 +371,11 @@ impl DisplayDriver {
     /// 数据是命令的参数，比如设置地址范围、颜色值等。
     /// 通过拉高 DC 引脚告诉屏幕"接下来是数据"。
     fn write_data(&mut self, data: u8) {
-        let _ = self.cs.set_low();   // 选中屏幕
-        let _ = self.dc.set_high();  // DC=高 = 数据模式
+        self.cs.set_low(); // 选中屏幕
+        self.dc.set_high(); // DC=高 = 数据模式
         let mut buf = [data];
         let _ = self.spi.as_mut().unwrap().transfer(&mut buf);
-        let _ = self.cs.set_high();  // 取消选中
+        self.cs.set_high(); // 取消选中
     }
 
     /// 发送命令和数据（原子操作）
@@ -384,14 +383,14 @@ impl DisplayDriver {
     /// 很多操作需要"命令+数据"的组合，比如设置寄存器值。
     /// 这个方法在一次 CS 选中期间完成，避免被其他操作打断。
     fn write_cmd_data(&mut self, cmd: u8, data: u8) {
-        let _ = self.cs.set_low();   // 选中屏幕
-        let _ = self.dc.set_low();   // 发送命令
+        self.cs.set_low(); // 选中屏幕
+        self.dc.set_low(); // 发送命令
         let mut buf = [cmd];
         let _ = self.spi.as_mut().unwrap().transfer(&mut buf);
-        let _ = self.dc.set_high();  // 发送数据
+        self.dc.set_high(); // 发送数据
         let mut buf = [data];
         let _ = self.spi.as_mut().unwrap().transfer(&mut buf);
-        let _ = self.cs.set_high();  // 取消选中
+        self.cs.set_high(); // 取消选中
     }
 
     /// 发送多个数据字节
@@ -399,14 +398,14 @@ impl DisplayDriver {
     /// 用于发送较长的数据，比如伽马校正表。
     /// 分块传输避免栈溢出（每块最多 64 字节）。
     fn write_data_bytes(&mut self, data: &[u8]) {
-        let _ = self.cs.set_low();
-        let _ = self.dc.set_high();
+        self.cs.set_low();
+        self.dc.set_high();
         let mut buf: [u8; 64] = [0; 64];
         for chunk in data.chunks(64) {
             buf[..chunk.len()].copy_from_slice(chunk);
             let _ = self.spi.as_mut().unwrap().transfer(&mut buf[..chunk.len()]);
         }
-        let _ = self.cs.set_high();
+        self.cs.set_high();
     }
 
     /// 设置显示窗口
@@ -422,31 +421,35 @@ impl DisplayDriver {
     /// - `x0`, `y0`: 窗口左上角坐标
     /// - `x1`, `y1`: 窗口右下角坐标
     pub fn set_address_window(&mut self, x0: u16, y0: u16, x1: u16, y1: u16) {
-        let _ = self.cs.set_low();
+        self.cs.set_low();
 
         // 设置列地址（X 方向）
-        let _ = self.dc.set_low();
+        self.dc.set_low();
         let mut buf = [commands::CASET];
         let _ = self.spi.as_mut().unwrap().transfer(&mut buf);
-        let _ = self.dc.set_high();
+        self.dc.set_high();
         let mut x_buf = [
-            (x0 >> 8) as u8, (x0 & 0xFF) as u8,
-            (x1 >> 8) as u8, (x1 & 0xFF) as u8,
+            (x0 >> 8) as u8,
+            (x0 & 0xFF) as u8,
+            (x1 >> 8) as u8,
+            (x1 & 0xFF) as u8,
         ];
         let _ = self.spi.as_mut().unwrap().transfer(&mut x_buf);
 
         // 设置行地址（Y 方向）
-        let _ = self.dc.set_low();
+        self.dc.set_low();
         let mut buf = [commands::PASET];
         let _ = self.spi.as_mut().unwrap().transfer(&mut buf);
-        let _ = self.dc.set_high();
+        self.dc.set_high();
         let mut y_buf = [
-            (y0 >> 8) as u8, (y0 & 0xFF) as u8,
-            (y1 >> 8) as u8, (y1 & 0xFF) as u8,
+            (y0 >> 8) as u8,
+            (y0 & 0xFF) as u8,
+            (y1 >> 8) as u8,
+            (y1 & 0xFF) as u8,
         ];
         let _ = self.spi.as_mut().unwrap().transfer(&mut y_buf);
 
-        let _ = self.cs.set_high();
+        self.cs.set_high();
     }
 
     /// 准备 DMA 传输
@@ -456,18 +459,18 @@ impl DisplayDriver {
     pub fn prepare_dma_transfer(&mut self, x0: u16, y0: u16, x1: u16, y1: u16) {
         self.set_address_window(x0, y0, x1, y1);
 
-        let _ = self.cs.set_low();
-        let _ = self.dc.set_low();
+        self.cs.set_low();
+        self.dc.set_low();
         let mut buf = [commands::RAMWR];
         let _ = self.spi.as_mut().unwrap().transfer(&mut buf);
-        let _ = self.dc.set_high();
+        self.dc.set_high();
     }
 
     /// 结束 DMA 传输
     ///
     /// 拉高 CS，告诉屏幕"这次传输结束了"。
     pub fn end_dma_transfer(&mut self) {
-        let _ = self.cs.set_high();
+        self.cs.set_high();
     }
 
     /// 取出 SPI 所有权
@@ -504,7 +507,7 @@ impl DisplayDriver {
         let dma_buf = unsafe { (*core::ptr::addr_of_mut!(DMA_BUF)).assume_init_mut() };
 
         let total_pixels = width * height;
-        let pixels_per_transfer = DMA_BUF_SIZE / 2;  // 每次传输 4096 像素
+        let pixels_per_transfer = DMA_BUF_SIZE / 2; // 每次传输 4096 像素
         let mut pixel_offset = 0;
 
         // 分块传输
@@ -516,7 +519,7 @@ impl DisplayDriver {
             // 每个像素 16 位，需要拆成 2 个字节传输
             for i in 0..count {
                 let pixel = framebuffer[pixel_offset + i];
-                dma_buf[i * 2] = (pixel >> 8) as u8;      // 高字节
+                dma_buf[i * 2] = (pixel >> 8) as u8; // 高字节
                 dma_buf[i * 2 + 1] = (pixel & 0xFF) as u8; // 低字节
             }
 
@@ -546,7 +549,7 @@ impl DisplayDriver {
     pub fn flush_rect(&mut self, x: u16, y: u16, w: u16, h: u16) {
         let width = self.width();
         let height = self.height();
-        
+
         // 边界检查
         if x >= width as u16 || y >= height as u16 {
             return;
@@ -654,7 +657,7 @@ impl DrawTarget for DisplayDriver {
     fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
         let width = self.width();
         let height = self.height();
-        
+
         // 裁剪到屏幕范围
         let area = area.intersection(&Rectangle::new(
             Point::zero(),
@@ -677,8 +680,8 @@ impl DrawTarget for DisplayDriver {
         for y in start_y..(start_y + area_height) {
             let row_start = y * width + start_x;
             let row_end = row_start + area_width;
-            for idx in row_start..row_end {
-                framebuffer[idx] = color_value;
+            for pixel in framebuffer.iter_mut().take(row_end).skip(row_start) {
+                *pixel = color_value;
             }
         }
 

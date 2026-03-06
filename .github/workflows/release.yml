@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: thumbv7em-none-eabihf
+    
+    - name: Build release
+      run: cargo build --release --target thumbv7em-none-eabihf
+    
+    - name: Install arm-none-eabi-tools
+      run: sudo apt-get install -y gcc-arm-none-eabi
+    
+    - name: Create binary
+      run: arm-none-eabi-objcopy -O binary target/thumbv7em-none-eabihf/release/stm32h750-drivers stm32h750-drivers.bin
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          stm32h750-drivers.bin
+          target/thumbv7em-none-eabihf/release/stm32h750-drivers
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

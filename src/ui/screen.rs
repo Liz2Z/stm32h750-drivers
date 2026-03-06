@@ -1,4 +1,8 @@
 //! 屏幕/容器
+//!
+//! 注意：部分功能为预留功能，暂未在主程序中使用
+
+#![allow(dead_code)]
 
 use super::{BoundingBox, GrayTheme, ProgressBar, Widget};
 use embedded_graphics::{pixelcolor::Rgb565, prelude::*};
@@ -44,11 +48,15 @@ impl Screen {
     }
 
     pub fn add_temp_humd_card(&mut self, card: super::TempHumidCard) -> Result<(), ()> {
-        self.widgets.push(Widget::TempHumidCard(card)).map_err(|_| ())
+        self.widgets
+            .push(Widget::TempHumidCard(card))
+            .map_err(|_| ())
     }
 
     pub fn add_pressure_card(&mut self, card: super::PressureCard) -> Result<(), ()> {
-        self.widgets.push(Widget::PressureCard(card)).map_err(|_| ())
+        self.widgets
+            .push(Widget::PressureCard(card))
+            .map_err(|_| ())
     }
 
     pub fn add_history_bar(&mut self, bar: super::HistoryBar) -> Result<(), ()> {
@@ -119,7 +127,7 @@ impl Screen {
     {
         for dirty in &self.dirty_rects {
             // 绘制该区域的背景
-            display.fill_solid(&dirty.to_rectangle(), self.theme.background())?;
+            display.fill_solid(&(*dirty).into_rectangle(), self.theme.background())?;
 
             // 绘制与该区域相交的控件
             for widget in &self.widgets {

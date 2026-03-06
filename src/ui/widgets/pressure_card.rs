@@ -1,4 +1,8 @@
 //! 气压显示卡片
+//!
+//! 注意：部分方法为预留功能，暂未在主程序中使用
+
+#![allow(dead_code)]
 
 use super::BoundingBox;
 use crate::ui::{GrayTheme, PixelIcon, PressureSensor};
@@ -102,7 +106,13 @@ impl PressureCard {
         text.draw(display)?;
 
         // 4. 绘制气压图标（32x32）
-        PixelIcon::Barometer.draw(display, self.x + self.width as i32 / 2 - 16, self.y + 30, 2, self.theme.g0)?;
+        PixelIcon::Barometer.draw(
+            display,
+            self.x + self.width as i32 / 2 - 16,
+            self.y + 30,
+            2,
+            self.theme.g0,
+        )?;
 
         // 5. 绘制当前气压值
         let value_str = self.sensor.pressure_str();

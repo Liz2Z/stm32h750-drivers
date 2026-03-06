@@ -1,26 +1,21 @@
-.PHONY: all flash flash-openocd debug clean bin
+.PHONY: all build flash flash-openocd debug clean bin
 
-all:
+all: build
+
+build:
 	cargo build --release
 
-bin: all
-	rust-objcopy -O binary target/thumbv7em-none-eabihf/release/rfid-stm32h750 target/thumbv7em-none-eabihf/release/rfid-stm32h750.bin
+bin: build
+	rust-objcopy -O binary target/thumbv7em-none-eabihf/release/stm32h750-drivers target/thumbv7em-none-eabihf/release/stm32h750-drivers.bin
 
-# 使用 OpenOCD 烧录
+flash: flash-openocd
+
 flash-openocd: bin
 	openocd -f interface/stlink.cfg -f target/stm32h7x.cfg \
-		-c "program target/thumbv7em-none-eabihf/release/rfid-stm32h750.bin verify reset exit 0x08000000"
+		-c "program target/thumbv7em-none-eabihf/release/stm32h750-drivers.bin verify reset exit 0x08000000"
 
-# 启动 OpenOCD GDB 调试服务器
 debug:
 	openocd -f interface/stlink.cfg -f target/stm32h7x.cfg
-
-# 在另一个终端用 GDB 连接:
-# arm-none-eabi-gdb target/thumbv7em-none-eabihf/release/rfid-stm32h750
-# (gdb) target remote :3333
-# (gdb) load
-# (gdb) break main
-# (gdb) continue
 
 clean:
 	cargo clean
