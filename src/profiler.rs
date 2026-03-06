@@ -39,7 +39,7 @@
 use cortex_m::peripheral::DWT;
 
 // 使用 serial 模块的 SerialTx
-use crate::serial::SerialTx;
+use crate::drivers::serial::SerialTx;
 
 /// 测量并输出耗时
 ///
