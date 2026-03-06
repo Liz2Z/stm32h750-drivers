@@ -1,4 +1,8 @@
 //! 边界框结构
+//!
+//! 注意：此模块为预留功能，暂未在主程序中使用
+
+#![allow(dead_code)]
 
 use embedded_graphics::{prelude::*, primitives::Rectangle};
 
@@ -22,7 +26,7 @@ impl BoundingBox {
     }
 
     /// 转换为 Rectangle
-    pub fn to_rectangle(&self) -> Rectangle {
+    pub fn into_rectangle(self) -> Rectangle {
         Rectangle::new(
             Point::new(self.x, self.y),
             Size::new(self.width, self.height),

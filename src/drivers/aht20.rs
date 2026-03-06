@@ -26,6 +26,7 @@ pub struct Aht20Reading {
 #[derive(Debug, Clone, Copy)]
 pub enum Aht20Error {
     I2cError,
+    #[allow(dead_code)]
     NotCalibrated,
     Busy,
     InvalidData,
@@ -134,18 +135,16 @@ where
             .read(AHT20_ADDR, &mut buf)
             .map_err(|_| Aht20Error::I2cError)?;
 
-        let humidity_raw = ((buf[1] as u32) << 12)
-            | ((buf[2] as u32) << 4)
-            | ((buf[3] as u32) >> 4);
+        let humidity_raw =
+            ((buf[1] as u32) << 12) | ((buf[2] as u32) << 4) | ((buf[3] as u32) >> 4);
 
-        let temperature_raw = (((buf[3] & 0x0F) as u32) << 16)
-            | ((buf[4] as u32) << 8)
-            | (buf[5] as u32);
+        let temperature_raw =
+            (((buf[3] & 0x0F) as u32) << 16) | ((buf[4] as u32) << 8) | (buf[5] as u32);
 
         let humidity = (humidity_raw as f32 / 1048576.0) * 100.0;
         let temperature = (temperature_raw as f32 / 1048576.0) * 200.0 - 50.0;
 
-        if humidity > 100.0 || humidity < 0.0 || temperature > 100.0 || temperature < -50.0 {
+        if !(0.0..=100.0).contains(&humidity) || !(-50.0..=100.0).contains(&temperature) {
             return Err(Aht20Error::InvalidData);
         }
 

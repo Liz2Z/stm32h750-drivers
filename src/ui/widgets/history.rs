@@ -1,4 +1,8 @@
 //! 历史记录条
+//!
+//! 注意：此控件为预留功能，暂未在主程序中使用
+
+#![allow(dead_code)]
 
 use super::BoundingBox;
 use crate::ui::GrayTheme;
@@ -45,9 +49,7 @@ impl HistoryBar {
     /// 更新数据
     pub fn update(&mut self, data: &[f32]) {
         let len = data.len().min(6);
-        for i in 0..len {
-            self.data[i] = data[i];
-        }
+        self.data[..len].copy_from_slice(&data[..len]);
         self.count = len;
     }
 

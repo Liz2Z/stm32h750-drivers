@@ -1,7 +1,15 @@
 [package]
-name = "rfid-stm32h750"
+name = "stm32h750-drivers"
 version = "0.1.0"
 edition = "2021"
+authors = ["Liz2Z <fitz-i@foxmail.com>"]
+description = "A collection of Rust-based drivers for STM32H750, including display (ILI9341), sensors (AHT20, BMP280, DHT11), and UI components"
+license = "MIT"
+repository = "https://github.com/yourusername/stm32h750-drivers"
+readme = "README.md"
+keywords = ["stm32", "stm32h750", "display", "ili9341", "embedded", "drivers", "sensors"]
+categories = ["embedded", "hardware-support", "no-std"]
+exclude = [".vscode", ".claude", "docs/*.pdf"]
 
 [dependencies]
 stm32h7xx-hal = { version = "0.16", features = ["stm32h750v", "rt"] }

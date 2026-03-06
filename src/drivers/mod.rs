@@ -19,8 +19,12 @@ pub mod display;
 pub mod serial;
 
 // 重新导出常用类型
+#[allow(unused_imports)]
 pub use aht20::{Aht20, Aht20Error, Aht20Reading};
+#[allow(unused_imports)]
 pub use bmp280::{Bmp280, Bmp280Error, Bmp280Reading};
+#[allow(unused_imports)]
 pub use dht11::{Dht11, DhtError, DhtReading};
 pub use display::{DisplayDriver, DisplayOrientation};
+#[allow(unused_imports)]
 pub use serial::SerialTx;

@@ -135,8 +135,8 @@ fn main() -> ! {
 
     // 屏幕控制引脚
     let mut disp_blk = gpiob.pb0.into_push_pull_output(); // 背光
-    let disp_dc = gpiob.pb1.into_push_pull_output();      // 数据/命令
-    let disp_cs = gpiob.pb12.into_push_pull_output();     // 片选
+    let disp_dc = gpiob.pb1.into_push_pull_output(); // 数据/命令
+    let disp_cs = gpiob.pb12.into_push_pull_output(); // 片选
 
     // SPI 引脚配置
     // 使用 VeryHigh 速度模式以支持 80MHz SPI 时钟
@@ -155,12 +155,12 @@ fn main() -> ! {
 
     // 启动动画：LED 快闪表示正在初始化
     for _ in 0..10 {
-        let _ = led.toggle();
+        led.toggle();
         delay_ms(50);
     }
 
     // 打开屏幕背光
-    let _ = disp_blk.set_high();
+    disp_blk.set_high();
 
     // 初始化 SPI2
     // 使用 MODE_3（CPOL=1, CPHA=1），这是 ILI9341 要求的模式
@@ -195,14 +195,8 @@ fn main() -> ! {
 
     // I2C1 引脚配置 (用于 AHT20 + BMP280 传感器)
     // PB6 = I2C1_SCL, PB7 = I2C1_SDA
-    let i2c_scl = gpiob
-        .pb6
-        .into_alternate::<4>()
-        .set_open_drain();
-    let i2c_sda = gpiob
-        .pb7
-        .into_alternate::<4>()
-        .set_open_drain();
+    let i2c_scl = gpiob.pb6.into_alternate::<4>().set_open_drain();
+    let i2c_sda = gpiob.pb7.into_alternate::<4>().set_open_drain();
 
     // 初始化 I2C1 (100kHz)
     let i2c = dp.I2C1.i2c(
@@ -214,79 +208,78 @@ fn main() -> ! {
 
     // 初始化 AHT20 温湿度传感器
     let mut aht20 = aht20::Aht20::new(i2c);
-    let mut aht20_ok = false;
-    
+    let mut _aht20_ok = false;
+
     match aht20.init() {
         Ok(_) => {
-               let screen = Screen::new(display.width() as u32, display.height() as u32)
-                        .with_theme(GrayTheme::new());
-                    let mut screen = screen;
-                    
-                    let _ = screen.add_label(Label::new(160, 80, "AHT20 INIT SUCCESS").centered());
-                    let _ = screen.draw_with_dma(&mut
-                         display);
-                    delay_ms(1000);
+            let screen = Screen::new(display.width() as u32, display.height() as u32)
+                .with_theme(GrayTheme::new());
+            let mut screen = screen;
+
+            let _ = screen.add_label(Label::new(160, 80, "AHT20 INIT SUCCESS").centered());
+            let _ = screen.draw_with_dma(&mut display);
+            delay_ms(1000);
             // AHT20 初始化成功，LED 闪烁一次
-            aht20_ok = true;
-            let _ = led.set_high();
+            _aht20_ok = true;
+            led.set_high();
             delay_ms(100);
-            let _ = led.set_low();
-        }
+            led.set_low();
+        },
         Err(_) => {
             // AHT20 初始化失败，在屏幕上显示错误
             let screen = Screen::new(display.width() as u32, display.height() as u32)
                 .with_theme(GrayTheme::new());
             let mut screen = screen;
-            
+
             let _ = screen.add_label(Label::new(160, 100, "AHT20 INIT FAILED").centered());
             let _ = screen.add_label(Label::new(160, 130, "Check I2C Connection").centered());
             let _ = screen.draw_with_dma(&mut display);
-            
+
             // LED 快闪 3 次
             for _ in 0..3 {
-                let _ = led.set_high();
+                led.set_high();
                 delay_ms(100);
-                let _ = led.set_low();
+                led.set_low();
                 delay_ms(100);
             }
-        }
+        },
     }
 
     // 初始化 BMP280 气压传感器
     // BMP280 有两个可能的 I2C 地址：0x76 和 0x77
     let i2c = aht20.release();
     let mut bmp280 = bmp280::Bmp280::new(i2c);
-    let mut bmp280_ok = false;
-    
+    let mut _bmp280_ok = false;
+
     match bmp280.init() {
         Ok(_) => {
             // BMP280 初始化成功
-            bmp280_ok = true;
+            _bmp280_ok = true;
             for _ in 0..2 {
-                let _ = led.set_high();
+                led.set_high();
                 delay_ms(100);
-                let _ = led.set_low();
+                led.set_low();
                 delay_ms(100);
             }
-        }
+        },
         Err(_) => {
             // BMP280 初始化失败，在屏幕上显示错误
             let screen = Screen::new(display.width() as u32, display.height() as u32)
                 .with_theme(GrayTheme::new());
             let mut screen = screen;
-            
+
             let _ = screen.add_label(Label::new(160, 80, "BMP280 INIT FAILED").centered());
             let _ = screen.add_label(Label::new(160, 110, "Check I2C Wiring").centered());
             let _ = screen.draw_with_dma(&mut display);
-            
+
             // LED 快闪 4 次
             for _ in 0..4 {
-                let _ = led.set_high();
+                led.set_high();
                 delay_ms(100);
-                let _ = led.set_low();
+                led.set_low();
                 delay_ms(100);
             }
-        }
+        },
     }
 
     // 释放 I2C 并重新创建 AHT20 实例用于后续读取
@@ -309,8 +302,8 @@ fn main() -> ! {
     // └───────────────┴────────────────────┘
 
     // 创建屏幕容器
-    let mut screen = Screen::new(display.width() as u32, display.height() as u32)
-        .with_theme(GrayTheme::new());
+    let mut screen =
+        Screen::new(display.width() as u32, display.height() as u32).with_theme(GrayTheme::new());
 
     // 创建传感器数据存储
     // 这些结构体会记录：
@@ -322,20 +315,16 @@ fn main() -> ! {
     let mut pressure_sensor = PressureSensor::new();
 
     // 添加温度卡片（左列）
-    let temp_card = TempHumidCard::new(5, 20, true)
-        .with_theme(GrayTheme::new());
+    let temp_card = TempHumidCard::new(5, 20, true).with_theme(GrayTheme::new());
     let _ = screen.add_temp_humd_card(temp_card);
 
     // 添加湿度卡片（中列）
-    let humid_card = TempHumidCard::new(110, 20, false)
-        .with_theme(GrayTheme::new());
+    let humid_card = TempHumidCard::new(110, 20, false).with_theme(GrayTheme::new());
     let _ = screen.add_temp_humd_card(humid_card);
 
     // 添加气压卡片（右列）
-    let pressure_card = PressureCard::new(215, 20)
-        .with_theme(GrayTheme::new());
+    let pressure_card = PressureCard::new(215, 20).with_theme(GrayTheme::new());
     let _ = screen.add_pressure_card(pressure_card);
-
 
     // 绘制初始界面
     screen.draw_with_dma(&mut display).unwrap();
@@ -361,10 +350,10 @@ fn main() -> ! {
             prelude::*,
             text::{Baseline, Text},
         };
-        
+
         let mut buf = [0u8; 12];
-        let mut len = 0;
-        
+        let len;
+
         if frame == 0 {
             buf[0] = b'0';
             len = 1;
@@ -375,29 +364,22 @@ fn main() -> ! {
                 temp_len += 1;
                 temp /= 10;
             }
-            
+
             len = temp_len;
             let mut n = frame;
+            let mut idx = temp_len;
             while n > 0 {
-                len -= 1;
-                buf[len] = b'0' + (n % 10) as u8;
+                idx -= 1;
+                buf[idx] = b'0' + (n % 10) as u8;
                 n /= 10;
             }
-            len = temp_len;
         }
-        
-        let frame_str = unsafe {
-            core::str::from_utf8_unchecked(&buf[..len])
-        };
-        
+
+        let frame_str = unsafe { core::str::from_utf8_unchecked(&buf[..len]) };
+
         let style = MonoTextStyle::new(&FONT_10X20, embedded_graphics::pixelcolor::Rgb565::BLACK);
-        let text = Text::with_baseline(
-            frame_str,
-            Point::new(280, 210),
-            style,
-            Baseline::Top,
-        );
-        
+        let text = Text::with_baseline(frame_str, Point::new(280, 210), style, Baseline::Top);
+
         let _ = text.draw(display);
     }
 
@@ -414,7 +396,7 @@ fn main() -> ! {
                 Ok(reading) => {
                     // 读取成功！
                     // LED 闪烁一次表示数据更新
-                    let _ = led.toggle();
+                    led.toggle();
 
                     // 更新传感器数据
                     temp_sensor.update_temp(reading.temperature);
@@ -423,16 +405,16 @@ fn main() -> ! {
                     // 释放 AHT20 的 I2C 总线，重新挂载到依然存活的 bmp280 实例上
                     let i2c = aht20.release();
                     bmp280.attach(i2c);
-                    
+
                     // 读取 BMP280 气压（此时它的 is_initialized 是 true，且包含全部校准数据）
                     match bmp280.read() {
                         Ok(bmp_reading) => {
                             // 更新气压数据
                             pressure_sensor.update(bmp_reading.pressure);
-                        }
+                        },
                         Err(_) => {
                             // BMP280 读取失败，保持上次的值
-                        }
+                        },
                     }
 
                     // 用完后释放出来，再交还给 AHT20
@@ -441,32 +423,30 @@ fn main() -> ! {
 
                     // 更新屏幕显示：先清空控件，然后重新添加带新数据的卡片
                     screen.widgets.clear();
-                    
+
                     // 创建带新数据的卡片（3列布局）
-                    let temp_card = TempHumidCard::new(5, 20, true)
-                        .with_theme(GrayTheme::new());
+                    let temp_card = TempHumidCard::new(5, 20, true).with_theme(GrayTheme::new());
                     let mut temp_card_with_data = temp_card;
                     temp_card_with_data.sensor = temp_sensor;
-                    
-                    let humid_card = TempHumidCard::new(110, 20, false)
-                        .with_theme(GrayTheme::new());
+
+                    let humid_card =
+                        TempHumidCard::new(110, 20, false).with_theme(GrayTheme::new());
                     let mut humid_card_with_data = humid_card;
                     humid_card_with_data.sensor = humid_sensor;
-                    
-                    let pressure_card = PressureCard::new(215, 20)
-                        .with_theme(GrayTheme::new());
+
+                    let pressure_card = PressureCard::new(215, 20).with_theme(GrayTheme::new());
                     let mut pressure_card_with_data = pressure_card;
                     pressure_card_with_data.sensor = pressure_sensor;
-                    
+
                     let _ = screen.add_temp_humd_card(temp_card_with_data);
                     let _ = screen.add_temp_humd_card(humid_card_with_data);
                     let _ = screen.add_pressure_card(pressure_card_with_data);
                     let _ = screen.draw_with_dma(&mut display);
-                }
+                },
                 Err(e) => {
                     // AHT20 读取失败，在屏幕上显示错误
                     screen.widgets.clear();
-                    
+
                     // 显示具体的错误信息
                     let error_msg = match e {
                         aht20::Aht20Error::I2cError => "I2C ERROR",
@@ -474,17 +454,17 @@ fn main() -> ! {
                         aht20::Aht20Error::Busy => "SENSOR BUSY",
                         aht20::Aht20Error::InvalidData => "INVALID DATA",
                     };
-                    
+
                     let _ = screen.add_label(Label::new(160, 80, "AHT20 READ ERROR").centered());
                     let _ = screen.add_label(Label::new(160, 110, error_msg).centered());
                     let _ = screen.draw_with_dma(&mut display);
-                    
+
                     // LED 快闪表示错误
                     for _ in 0..3 {
-                        let _ = led.toggle();
+                        led.toggle();
                         delay_ms(100);
                     }
-                }
+                },
             }
         }
 
@@ -494,7 +474,7 @@ fn main() -> ! {
         // 心跳指示
         // LED 每秒闪烁一次，表示系统正常运行
         if frame_count % 60 == 0 {
-            let _ = led.toggle();
+            led.toggle();
         }
 
         // 帧率控制

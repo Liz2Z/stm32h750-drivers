@@ -1,4 +1,6 @@
 //! 淡蓝色主题
+//!
+//! 注意：此主题为预留功能，暂未在主程序中使用
 
 use embedded_graphics::pixelcolor::Rgb565;
 
@@ -12,6 +14,7 @@ pub struct LightBlueTheme {
     /// g2 - 中深蓝 - 进度条填充
     pub g2: Rgb565,
     /// g3 - 中蓝 - 边框阴影
+    #[allow(dead_code)]
     pub g3: Rgb565,
     /// g4 - 中浅蓝 - 普通按钮
     pub g4: Rgb565,
@@ -33,14 +36,14 @@ impl LightBlueTheme {
     /// 创建默认淡蓝色主题
     pub fn new() -> Self {
         Self {
-            g0: Rgb565::new(2, 10, 24),    // 深海蓝 #1A3C66
-            g1: Rgb565::new(4, 16, 34),    // 深蓝 #2B5B8C
-            g2: Rgb565::new(6, 22, 44),    // 中深蓝 #3D7AB2
-            g3: Rgb565::new(9, 30, 52),    // 中蓝 #4F8CD4
-            g4: Rgb565::new(12, 38, 58),   // 中浅蓝 #6BA3E0
-            g5: Rgb565::new(16, 48, 68),   // 浅蓝 #8DBAE8
-            g6: Rgb565::new(22, 58, 76),   // 淡蓝 #B3D4F0
-            g7: Rgb565::new(28, 62, 80),   // 天蓝白 #E0F0FF
+            g0: Rgb565::new(2, 10, 24),  // 深海蓝 #1A3C66
+            g1: Rgb565::new(4, 16, 34),  // 深蓝 #2B5B8C
+            g2: Rgb565::new(6, 22, 44),  // 中深蓝 #3D7AB2
+            g3: Rgb565::new(9, 30, 52),  // 中蓝 #4F8CD4
+            g4: Rgb565::new(12, 38, 58), // 中浅蓝 #6BA3E0
+            g5: Rgb565::new(16, 48, 68), // 浅蓝 #8DBAE8
+            g6: Rgb565::new(22, 58, 76), // 淡蓝 #B3D4F0
+            g7: Rgb565::new(28, 62, 80), // 天蓝白 #E0F0FF
         }
     }
 

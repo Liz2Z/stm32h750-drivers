@@ -13,6 +13,7 @@ const BMP280_ADDR_HIGH: u8 = 0x77;
 const REG_CALIBRATION: u8 = 0x88;
 const REG_ID: u8 = 0xD0;
 const REG_RESET: u8 = 0xE0;
+#[allow(dead_code)]
 const REG_STATUS: u8 = 0xF3;
 const REG_CTRL_MEAS: u8 = 0xF4;
 const REG_CONFIG: u8 = 0xF5;
@@ -20,34 +21,53 @@ const REG_PRESSURE_MSB: u8 = 0xF7;
 
 const BMP280_ID: u8 = 0x58;
 
+#[allow(dead_code)]
 const MODE_SLEEP: u8 = 0x00;
+#[allow(dead_code)]
 const MODE_FORCED: u8 = 0x01;
 const MODE_NORMAL: u8 = 0x03;
 
+#[allow(dead_code)]
 const OVERSAMPLING_SKIP: u8 = 0x00;
+#[allow(dead_code)]
 const OVERSAMPLING_1X: u8 = 0x01;
+#[allow(dead_code)]
 const OVERSAMPLING_2X: u8 = 0x02;
+#[allow(dead_code)]
 const OVERSAMPLING_4X: u8 = 0x03;
+#[allow(dead_code)]
 const OVERSAMPLING_8X: u8 = 0x04;
 const OVERSAMPLING_16X: u8 = 0x05;
 
+#[allow(dead_code)]
 const FILTER_OFF: u8 = 0x00;
+#[allow(dead_code)]
 const FILTER_2: u8 = 0x01;
 const FILTER_4: u8 = 0x02;
+#[allow(dead_code)]
 const FILTER_8: u8 = 0x03;
+#[allow(dead_code)]
 const FILTER_16: u8 = 0x04;
 
+#[allow(dead_code)]
 const STANDBY_0_5MS: u8 = 0x00;
+#[allow(dead_code)]
 const STANDBY_62_5MS: u8 = 0x01;
 const STANDBY_125MS: u8 = 0x02;
+#[allow(dead_code)]
 const STANDBY_250MS: u8 = 0x03;
+#[allow(dead_code)]
 const STANDBY_500MS: u8 = 0x04;
+#[allow(dead_code)]
 const STANDBY_1000MS: u8 = 0x05;
+#[allow(dead_code)]
 const STANDBY_2000MS: u8 = 0x06;
+#[allow(dead_code)]
 const STANDBY_4000MS: u8 = 0x07;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Bmp280Reading {
+    #[allow(dead_code)]
     pub temperature: f32,
     pub pressure: f32,
 }
@@ -56,7 +76,9 @@ pub struct Bmp280Reading {
 pub enum Bmp280Error {
     I2cError,
     DeviceNotFound,
+    #[allow(dead_code)]
     InvalidCalibration,
+    #[allow(dead_code)]
     MeasurementNotReady,
 }
 
@@ -129,7 +151,14 @@ where
     fn detect_device(&mut self) -> Result<bool, Bmp280Error> {
         for addr in [BMP280_ADDR_LOW, BMP280_ADDR_HIGH] {
             let mut buf = [0u8; 1];
-            if self.i2c.as_mut().unwrap().write_read(addr, &[REG_ID], &mut buf).is_ok() && buf[0] == BMP280_ID {
+            if self
+                .i2c
+                .as_mut()
+                .unwrap()
+                .write_read(addr, &[REG_ID], &mut buf)
+                .is_ok()
+                && buf[0] == BMP280_ID
+            {
                 self.addr = addr;
                 return Ok(true);
             }
@@ -138,7 +167,9 @@ where
     }
 
     fn soft_reset(&mut self) -> Result<(), Bmp280Error> {
-        self.i2c.as_mut().unwrap()
+        self.i2c
+            .as_mut()
+            .unwrap()
             .write(self.addr, &[REG_RESET, 0xB6])
             .map_err(|_| Bmp280Error::I2cError)?;
 
@@ -147,7 +178,9 @@ where
 
     fn read_calibration_data(&mut self) -> Result<(), Bmp280Error> {
         let mut buf = [0u8; 24];
-        self.i2c.as_mut().unwrap()
+        self.i2c
+            .as_mut()
+            .unwrap()
             .write_read(self.addr, &[REG_CALIBRATION], &mut buf)
             .map_err(|_| Bmp280Error::I2cError)?;
 
@@ -170,12 +203,16 @@ where
 
     fn configure(&mut self) -> Result<(), Bmp280Error> {
         let config = (STANDBY_125MS << 5) | (FILTER_4 << 2);
-        self.i2c.as_mut().unwrap()
+        self.i2c
+            .as_mut()
+            .unwrap()
             .write(self.addr, &[REG_CONFIG, config])
             .map_err(|_| Bmp280Error::I2cError)?;
 
         let ctrl_meas = (OVERSAMPLING_16X << 5) | (OVERSAMPLING_16X << 2) | MODE_NORMAL;
-        self.i2c.as_mut().unwrap()
+        self.i2c
+            .as_mut()
+            .unwrap()
             .write(self.addr, &[REG_CTRL_MEAS, ctrl_meas])
             .map_err(|_| Bmp280Error::I2cError)?;
 
@@ -188,12 +225,16 @@ where
         }
 
         let mut buf = [0u8; 6];
-        self.i2c.as_mut().unwrap()
+        self.i2c
+            .as_mut()
+            .unwrap()
             .write_read(self.addr, &[REG_PRESSURE_MSB], &mut buf)
             .map_err(|_| Bmp280Error::I2cError)?;
 
-        let pressure_raw = ((buf[0] as u32) << 12) | ((buf[1] as u32) << 4) | ((buf[2] as u32) >> 4);
-        let temperature_raw = ((buf[3] as u32) << 12) | ((buf[4] as u32) << 4) | ((buf[5] as u32) >> 4);
+        let pressure_raw =
+            ((buf[0] as u32) << 12) | ((buf[1] as u32) << 4) | ((buf[2] as u32) >> 4);
+        let temperature_raw =
+            ((buf[3] as u32) << 12) | ((buf[4] as u32) << 4) | ((buf[5] as u32) >> 4);
 
         let temperature = self.compensate_temperature(temperature_raw);
         let pressure = self.compensate_pressure(pressure_raw);
@@ -206,11 +247,14 @@ where
 
     fn compensate_temperature(&mut self, raw: u32) -> f32 {
         let var1 = ((((raw as i32) >> 3) - ((self.calibration.dig_t1 as i32) << 1))
-            * (self.calibration.dig_t2 as i32)) >> 11;
-        
-        let var2 = (((((raw as i32) >> 4) - (self.calibration.dig_t1 as i32))
-            * (((raw as i32) >> 4) - (self.calibration.dig_t1 as i32))) >> 12)
-            * (self.calibration.dig_t3 as i32) >> 14;
+            * (self.calibration.dig_t2 as i32))
+            >> 11;
+
+        let var2 = ((((((raw as i32) >> 4) - (self.calibration.dig_t1 as i32))
+            * (((raw as i32) >> 4) - (self.calibration.dig_t1 as i32)))
+            >> 12)
+            * (self.calibration.dig_t3 as i32))
+            >> 14;
 
         self.t_fine = var1 + var2;
 
@@ -223,7 +267,8 @@ where
         let var2 = var2 + var1 * (self.calibration.dig_p5 as f32) * 2.0;
         let var2 = (var2 / 4.0) + ((self.calibration.dig_p4 as f32) * 65536.0);
         let var1 = ((self.calibration.dig_p3 as f32) * var1 * var1 / 524288.0
-            + (self.calibration.dig_p2 as f32) * var1) / 524288.0;
+            + (self.calibration.dig_p2 as f32) * var1)
+            / 524288.0;
         let var1 = (1.0 + var1 / 32768.0) * (self.calibration.dig_p1 as f32);
 
         if var1 == 0.0 {

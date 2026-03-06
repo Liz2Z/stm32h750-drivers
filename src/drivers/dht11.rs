@@ -32,6 +32,10 @@
 //! - 两次读取间隔至少 1~2 秒（传感器需要时间进行模数转换）
 //! - 测量范围：温度 0-50°C，湿度 20-90%RH
 //! - 不适合高精度测量场景
+//!
+//! 注意：此模块为预留功能，暂未在主程序中使用
+
+#![allow(dead_code)]
 
 use embedded_hal::digital::v2::{InputPin, OutputPin};
 
@@ -160,8 +164,8 @@ where
 
         // 步骤 3：读取 5 个字节的数据
         let mut data = [0u8; 5];
-        for i in 0..5 {
-            data[i] = self.read_byte()?;
+        for byte in data.iter_mut() {
+            *byte = self.read_byte()?;
         }
 
         // 步骤 4：验证校验和

@@ -259,21 +259,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rfid-stm32h750"
-version = "0.1.0"
-dependencies = [
- "cortex-m",
- "cortex-m-rt",
- "embedded-graphics",
- "embedded-hal",
- "heapless",
- "micromath",
- "nb 1.1.0",
- "panic-halt",
- "stm32h7xx-hal",
-]
-
-[[package]]
 name = "rustc_version"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -343,6 +328,21 @@ dependencies = [
  "cortex-m",
  "cortex-m-rt",
  "vcell",
+]
+
+[[package]]
+name = "stm32h750-drivers"
+version = "0.1.0"
+dependencies = [
+ "cortex-m",
+ "cortex-m-rt",
+ "embedded-graphics",
+ "embedded-hal",
+ "heapless",
+ "micromath",
+ "nb 1.1.0",
+ "panic-halt",
+ "stm32h7xx-hal",
 ]
 
 [[package]]

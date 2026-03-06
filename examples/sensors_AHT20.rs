@@ -43,7 +43,7 @@ fn main() -> ! {
     // ============================================================
     // 系统初始化
     // ============================================================
-    
+
     let dp = pac::Peripherals::take().unwrap();
 
     // 配置电源和时钟
@@ -51,27 +51,19 @@ fn main() -> ! {
     let pwrcfg = pwr.vos1().freeze(); // VOS1 = 最高性能模式
 
     let rcc = dp.RCC.constrain();
-    let ccdr = rcc
-        .sys_ck(400.MHz())
-        .freeze(pwrcfg, &dp.SYSCFG);
+    let ccdr = rcc.sys_ck(400.MHz()).freeze(pwrcfg, &dp.SYSCFG);
 
     // ============================================================
     // I2C 配置
     // ============================================================
-    
+
     let gpiob = dp.GPIOB.split(ccdr.peripheral.GPIOB);
 
     // I2C1 引脚配置
     // PB6 = I2C1_SCL, PB7 = I2C1_SDA
     // 必须设置为开漏输出，并确保硬件上有上拉电阻
-    let i2c_scl = gpiob
-        .pb6
-        .into_alternate::<4>()
-        .set_open_drain();
-    let i2c_sda = gpiob
-        .pb7
-        .into_alternate::<4>()
-        .set_open_drain();
+    let i2c_scl = gpiob.pb6.into_alternate::<4>().set_open_drain();
+    let i2c_sda = gpiob.pb7.into_alternate::<4>().set_open_drain();
 
     // 初始化 I2C1 (100kHz)
     let i2c = dp.I2C1.i2c(
@@ -84,7 +76,7 @@ fn main() -> ! {
     // ============================================================
     // AHT20 初始化
     // ============================================================
-    
+
     let mut aht20 = Aht20::new(i2c);
 
     // 初始化传感器
@@ -92,69 +84,69 @@ fn main() -> ! {
         Ok(_) => {
             // 初始化成功
             // 可以在这里添加 LED 指示或其他反馈
-        }
+        },
         Err(e) => {
             // 初始化失败，根据错误类型处理
             match e {
                 aht20::Aht20Error::I2cError => {
                     // I2C 通信错误，检查硬件连接和上拉电阻
-                }
+                },
                 aht20::Aht20Error::NotCalibrated => {
                     // 传感器未校准
-                }
+                },
                 aht20::Aht20Error::Busy => {
                     // 传感器忙
-                }
+                },
                 aht20::Aht20Error::InvalidData => {
                     // 无效数据
-                }
+                },
             }
-            
+
             // 初始化失败，进入死循环
             loop {
                 delay_ms(1000);
             }
-        }
+        },
     }
 
     // ============================================================
     // 主循环 - 读取传感器数据
     // ============================================================
-    
+
     loop {
         match aht20.read() {
             Ok(reading) => {
                 // 读取成功
                 let temperature = reading.temperature;
                 let humidity = reading.humidity;
-                
+
                 // 在这里可以处理数据：
                 // - 通过串口发送
                 // - 显示在屏幕上
                 // - 存储到缓冲区
                 // - 触发其他操作
-                
+
                 // 示例：简单使用变量（避免编译器警告）
                 let _ = temperature;
                 let _ = humidity;
-            }
+            },
             Err(e) => {
                 // 读取失败，根据错误类型处理
                 match e {
                     aht20::Aht20Error::I2cError => {
                         // I2C 通信错误
-                    }
+                    },
                     aht20::Aht20Error::NotCalibrated => {
                         // 传感器未校准
-                    }
+                    },
                     aht20::Aht20Error::Busy => {
                         // 传感器忙，可能延时不够
-                    }
+                    },
                     aht20::Aht20Error::InvalidData => {
                         // 无效数据，可能是传感器故障
-                    }
+                    },
                 }
-            }
+            },
         }
 
         // 每 2 秒读取一次
