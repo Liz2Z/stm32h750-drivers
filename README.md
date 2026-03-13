@@ -1,6 +1,6 @@
 # STM32H750 Drivers
 
-使用 Rust 编写的 STM32H750 单片机驱动集合，包含显示屏驱动（ILI9341）、多种传感器驱动（AHT20、BMP280、DHT11）和 UI 组件库。
+使用 Rust 编写的 STM32H750 单片机驱动集合，包含显示屏驱动（ILI9341）、多种传感器驱动（AHT20、BMP280、DHT11、RC522 RFID）和 UI 组件库。
 
 ## 示例展示
 
@@ -12,7 +12,7 @@
 - **可视化显示**：温度、湿度、气压分别以卡片形式在 ILI9341 屏幕上展示
 - **状态指示**：LED 闪烁表示系统正常运行
 - **高性能**：使用 DMA 和帧缓冲实现流畅显示
-- **预留扩展**：包含 DHT11、NTC 等传感器的预留驱动
+- **预留扩展**：包含 DHT11、RC522 RFID、NTC 等传感器驱动
 
 ## 硬件规格
 
@@ -105,7 +105,8 @@ src/
 │   ├── aht20.rs         # AHT20 温湿度传感器
 │   ├── bmp280.rs        # BMP280 气压传感器
 │   ├── display.rs       # ILI9341 屏幕驱动
-│   ├── dht11.rs         # DHT11 预留驱动
+│   ├── dht11.rs         # DHT11 温湿度传感器
+│   ├── rc522.rs         # RC522 RFID 读卡器
 │   ├── adc_ntc.rs       # NTC 预留驱动
 │   └── serial.rs        # 串口通信
 └── ui/
@@ -148,6 +149,7 @@ src/
   - [字符编码问题](docs/troubleshootings/CHARACTER_ENCODING_ISSUE.md)
   - [显示驱动问题](docs/troubleshootings/DISPLAY_DRIVER.md)
   - [延时和 I2C 问题](docs/troubleshootings/STM32H750_DELAY_AND_I2C_ISSUES.md)
+  - [RC522 SPI 通信问题记录](docs/troubleshootings/RC522_SPI_NOTES.md)
 
 ## 性能优化
 
