@@ -7,6 +7,7 @@
 //! - [`aht20`] - AHT20 温湿度传感器驱动
 //! - [`bmp280`] - BMP280 气压和温度传感器驱动
 //! - [`dht11`] - DHT11 温湿度传感器驱动
+//! - [`rc522`] - RC522 RFID 读卡器驱动
 //! - [`adc_ntc`] - ADC NTC 热敏电阻驱动
 //! - [`display`] - ILI9341 TFT 显示屏驱动
 //! - [`serial`] - 串口通信驱动
@@ -16,6 +17,7 @@ pub mod aht20;
 pub mod bmp280;
 pub mod dht11;
 pub mod display;
+pub mod rc522;
 pub mod serial;
 
 // 重新导出常用类型
@@ -26,5 +28,7 @@ pub use bmp280::{Bmp280, Bmp280Error, Bmp280Reading};
 #[allow(unused_imports)]
 pub use dht11::{Dht11, DhtError, DhtReading};
 pub use display::{DisplayDriver, DisplayOrientation};
+#[allow(unused_imports)]
+pub use rc522::{MifareKeyType, Rc522, Rc522Error};
 #[allow(unused_imports)]
 pub use serial::SerialTx;
