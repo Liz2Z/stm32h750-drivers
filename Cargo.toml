@@ -19,7 +19,7 @@ embedded-graphics = "0.7"
 embedded-hal = "0.2"
 panic-halt = "1.0"
 nb = "1.0"
-heapless = "0.7"
+heapless = "0.9"
 micromath = "1.1"
 
 [features]
