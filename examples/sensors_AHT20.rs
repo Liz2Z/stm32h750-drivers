@@ -66,7 +66,7 @@ fn main() -> ! {
     let i2c_sda = gpiob.pb7.into_alternate::<4>().set_open_drain();
 
     // 初始化 I2C1 (100kHz)
-    let i2c = dp.I2C1.i2c(
+    let mut i2c = dp.I2C1.i2c(
         (i2c_scl, i2c_sda),
         100.kHz(),
         ccdr.peripheral.I2C1,
@@ -77,10 +77,10 @@ fn main() -> ! {
     // AHT20 初始化
     // ============================================================
 
-    let mut aht20 = Aht20::new(i2c);
+    let mut aht20 = Aht20::new();
 
     // 初始化传感器
-    match aht20.init() {
+    match aht20.init(&mut i2c, &mut delay_ms) {
         Ok(_) => {
             // 初始化成功
             // 可以在这里添加 LED 指示或其他反馈
@@ -114,7 +114,7 @@ fn main() -> ! {
     // ============================================================
 
     loop {
-        match aht20.read() {
+        match aht20.read(&mut i2c, &mut delay_ms) {
             Ok(reading) => {
                 // 读取成功
                 let temperature = reading.temperature;

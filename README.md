@@ -11,8 +11,9 @@
 - **实时监测**：定期读取 AHT20 温湿度传感器和 BMP280 气压传感器数据
 - **可视化显示**：温度、湿度、气压分别以卡片形式在 ILI9341 屏幕上展示
 - **状态指示**：LED 闪烁表示系统正常运行
-- **高性能**：使用 DMA 和帧缓冲实现流畅显示
+- **高性能**：使用帧缓冲和局部刷新减少 SPI 传输
 - **预留扩展**：包含 DHT11、NTC 等传感器的预留驱动
+- **Wi-Fi 上报**：通过 ESP8266-01S 串口协处理器把传感器数据发布到局域网
 
 ## 硬件规格
 
@@ -32,9 +33,9 @@
 | 传感器 | 引脚 | 连接 | 说明 |
 |--------|------|------|------|
 | AHT20 | PB7 | SDA | I2C 数据线 |
-| AHT20 | PB8 | SCL | I2C 时钟线 |
+| AHT20 | PB6 | SCL | I2C 时钟线 |
 | BMP280 | PB7 | SDA | I2C 数据线（共享）|
-| BMP280 | PB8 | SCL | I2C 时钟线（共享）|
+| BMP280 | PB6 | SCL | I2C 时钟线（共享）|
 
 ### ILI9341 TFT 屏幕 (SPI2)
 
@@ -52,6 +53,19 @@
 | 引脚 | 说明 |
 |------|------|
 | PA1 | 状态 LED（读取成功时闪烁）|
+
+### ESP8266-01S 串口协处理器 (USART3)
+
+| STM32H750 引脚 | ESP-01S 引脚 | 说明 |
+|---------------|-------------|------|
+| 3.3V | VCC | 电源 |
+| 3.3V | EN | 使能拉高 |
+| 3.3V | RST | 保持非复位 |
+| 3.3V | GPIO0 | 正常启动拉高 |
+| 3.3V | GPIO2 | 正常启动拉高 |
+| GND | GND | 地 |
+| PB10 | RX | STM32 TX -> ESP RX |
+| PB11 | TX | STM32 RX <- ESP TX |
 
 ## 快速开始
 
@@ -79,6 +93,27 @@ cargo build --release
 
 ```bash
 make flash
+```
+
+### ESP8266 侧
+
+当前显示/采集固件默认设置 `ESP8266_ENABLED = false`，跳过 ESP 连接和重试，避免其
+阻塞采样更新。下述通信设计仍待与驱动核对，重新启用前需处理协议和阻塞问题。
+
+ESP-01S 需要烧录自定义 `ota.ino`，它不是 AT 固件。当前工程按**文本行协议**与它通信，默认波特率是 `115200`。
+
+串口协议示例：
+
+```text
+PING
+WIFI?
+SENSOR TEMP=25.3 HUM=61.2 PRES=1008.6
+```
+
+如果 ESP 已连上 Wi-Fi，最新传感器值会出现在：
+
+```text
+http://<esp-ip>/sensor
 ```
 
 ### GDB 调试
@@ -125,14 +160,16 @@ src/
 使用帧缓冲实现高效显示：
 
 1. **内存布局**：240×320×2 字节 ≈ 150KB (AXISRAM)
-2. **绘图流程**：在内存中绘制 → DMA 批量传输 → 屏幕显示
-3. **性能**：约 10fps 全屏刷新
+2. **绘图流程**：在内存中绘制 → 有超时的阻塞式 SPI 分块传输 → 屏幕显示
+3. **局部刷新**：仅重绘变化的卡片数字与状态，静态图标和边框保留；三张卡片同时更新的像素数据约减少 56%
 
 ### 传感器轮询
 
-- 每 5 秒读取一次传感器数据
-- AHT20 和 BMP280 共享 I2C 总线
-- 自动处理传感器初始化失败的情况
+- 使用 TIM2 硬件计时，每 5 秒调度一次采样；首帧立即采样
+- AHT20 和 BMP280 借用同一条 I2C 总线，独立采集与重试
+- 采集失败显示 `ERROR`；保留上次有效值时显示 `STALE`
+- I2C 事务和 SPI 传输具有超时，错误会返回应用层
+- `make test` 运行主机回归测试，`make check` 检查格式和 Clippy
 
 ## 开发文档
 
@@ -148,10 +185,12 @@ src/
   - [字符编码问题](docs/troubleshootings/CHARACTER_ENCODING_ISSUE.md)
   - [显示驱动问题](docs/troubleshootings/DISPLAY_DRIVER.md)
   - [延时和 I2C 问题](docs/troubleshootings/STM32H750_DELAY_AND_I2C_ISSUES.md)
+  - [显示与采集可靠性、局部刷新](docs/troubleshootings/DISPLAY_AND_SENSOR_RELIABILITY.md)
+  - [ESP8266-01S 串口协处理器模式](docs/troubleshootings/ESP8266_01S_UART_COPROCESSOR.md)
 
 ## 性能优化
 
-- 使用 DMA 传输减少 CPU 占用
+- 局部更新卡片数字和状态，减少 SPI 数据量；当前未启用硬件 DMA
 - 帧缓冲避免频繁 SPI 通信
 - 优化传感器读取间隔
 

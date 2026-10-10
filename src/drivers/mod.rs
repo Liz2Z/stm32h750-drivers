@@ -10,12 +10,14 @@
 //! - [`adc_ntc`] - ADC NTC 热敏电阻驱动
 //! - [`display`] - ILI9341 TFT 显示屏驱动
 //! - [`serial`] - 串口通信驱动
+//! - [`esp8266`] - ESP8266 UART 协处理器驱动
 
 pub mod adc_ntc;
-pub mod aht20;
-pub mod bmp280;
+pub use stm32h750_drivers::{aht20, bmp280};
+pub mod bounded_i2c;
 pub mod dht11;
 pub mod display;
+pub mod esp8266;
 pub mod serial;
 
 // 重新导出常用类型
@@ -26,5 +28,7 @@ pub use bmp280::{Bmp280, Bmp280Error, Bmp280Reading};
 #[allow(unused_imports)]
 pub use dht11::{Dht11, DhtError, DhtReading};
 pub use display::{DisplayDriver, DisplayOrientation};
+#[allow(unused_imports)]
+pub use esp8266::{Esp8266, Esp8266Error, HttpEndpoint, SensorPayload, WifiStatus};
 #[allow(unused_imports)]
 pub use serial::SerialTx;

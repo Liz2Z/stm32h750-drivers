@@ -23,7 +23,7 @@
 //! | 引脚 | 连接 | 说明 |
 //! |------|------|------|
 //! | PB7 | SDA | I2C 数据线 |
-//! | PB8 | SCL | I2C 时钟线 |
+//! | PB6 | SCL | I2C 时钟线 |
 //! | VCC | 3.3V | 电源 |
 //! | GND | GND | 地 |
 //!
@@ -31,7 +31,7 @@
 //! | 引脚 | 连接 | 说明 |
 //! |------|------|------|
 //! | PB7 | SDA | I2C 数据线（共享）|
-//! | PB8 | SCL | I2C 时钟线（共享）|
+//! | PB6 | SCL | I2C 时钟线（共享）|
 //! | VCC | 3.3V | 电源 |
 //! | GND | GND | 地 |
 //!
@@ -53,29 +53,162 @@
 #![no_std]
 #![no_main]
 
+mod clock;
 mod drivers;
 mod profiler;
-mod ui;
+use stm32h750_drivers::ui;
 
 use cortex_m_rt::entry;
 use panic_halt as _;
 use stm32h7xx_hal::pac;
 use stm32h7xx_hal::prelude::*;
+use stm32h7xx_hal::serial::SerialExt;
 use stm32h7xx_hal::spi;
 
-use drivers::{aht20, bmp280, display, DisplayDriver, DisplayOrientation};
+use clock::Clock;
+use drivers::bounded_i2c::BoundedI2c;
+use drivers::{
+    DisplayDriver, DisplayOrientation, Esp8266, Esp8266Error, HttpEndpoint, SensorPayload,
+};
 use embedded_graphics::pixelcolor::Rgb565;
-use embedded_graphics::prelude::*;
+use heapless::String;
+use stm32h750_drivers::{
+    acquisition::Sensors,
+    scheduling::{Periodic, RefreshRate},
+};
 
-use ui::{GrayTheme, Label, PressureCard, PressureSensor, Screen, TempHumidCard, TempHumidSensor};
+use ui::{GrayTheme, PressureCard, PressureSensor, Screen, TempHumidCard, TempHumidSensor};
+
+// 当前只验证显示和采集；避免未配置的 ESP 阻塞主循环。
+const ESP8266_ENABLED: bool = false;
+const ESP8266_UART_BAUD: u32 = 115_200;
+const ESP8266_WIFI_SSID: &str = "quantum-wifi";
+const ESP8266_WIFI_PASSWORD: &str = "qwerzxc123!@#";
+const ESP8266_HTTP_HOST: &str = "";
+const ESP8266_HTTP_PORT: u16 = 80;
+const ESP8266_HTTP_PATH: &str = "/sensor";
+
+#[derive(Clone, Copy)]
+enum UploadState {
+    Disabled,
+    Idle,
+    Ok,
+    Failed,
+}
+
+#[derive(Clone, Copy)]
+enum EspLinkState {
+    SerialReady,
+    WifiConnected,
+    Failed,
+}
 
 /// 软件延时函数
 ///
-/// 用于系统启动阶段和主循环中的帧率控制。
+/// 用于现有的系统启动和 ESP8266 阻塞流程。
 /// STM32H750 主频 400MHz，1ms = 400,000 个 CPU 周期
-/// 使用 cortex_m::asm::delay 精确消耗周期数
+/// 启动与 ESP 代码沿用周期延时；传感器和调度使用 TIM2。
 fn delay_ms(ms: u32) {
     cortex_m::asm::delay(ms * 400_000);
+}
+
+fn draw_status<D>(
+    display: &mut D,
+    link_state: EspLinkState,
+    upload_state: UploadState,
+    sample_count: u32,
+    refresh_centihz: Option<u32>,
+) where
+    D: embedded_graphics::prelude::DrawTarget<Color = embedded_graphics::pixelcolor::Rgb565>,
+{
+    use embedded_graphics::{
+        mono_font::{ascii::FONT_6X10, MonoTextStyle},
+        prelude::*,
+        primitives::{PrimitiveStyle, Rectangle},
+        text::{Baseline, Text},
+    };
+
+    let status_bg = Rgb565::new(26, 58, 74);
+    let wifi_color = match link_state {
+        EspLinkState::WifiConnected => Rgb565::new(0, 40, 0),
+        EspLinkState::Failed => Rgb565::new(31, 8, 8),
+        _ => Rgb565::BLACK,
+    };
+    let upload_color = match upload_state {
+        UploadState::Ok => Rgb565::new(0, 40, 0),
+        UploadState::Failed => Rgb565::new(31, 8, 8),
+        UploadState::Disabled => Rgb565::new(14, 18, 20),
+        UploadState::Idle => Rgb565::BLACK,
+    };
+
+    let _ = Rectangle::new(Point::new(0, 220), Size::new(320, 20))
+        .into_styled(PrimitiveStyle::with_fill(status_bg))
+        .draw(display);
+
+    let wifi_style = MonoTextStyle::new(&FONT_6X10, wifi_color);
+    let upload_style = MonoTextStyle::new(&FONT_6X10, upload_color);
+    let frame_style = MonoTextStyle::new(&FONT_6X10, Rgb565::BLACK);
+
+    if !ESP8266_ENABLED {
+        let mut text: String<24> = String::new();
+        let _ = core::fmt::write(&mut text, format_args!("Samples: {}", sample_count));
+        let _ = Text::with_baseline(
+            text.as_str(),
+            Point::new(4, 225),
+            frame_style,
+            Baseline::Top,
+        )
+        .draw(display);
+        let mut rate_text: String<32> = String::new();
+        if let Some(rate) = refresh_centihz {
+            let _ = core::fmt::write(
+                &mut rate_text,
+                format_args!("Refresh: {}.{:02} Hz", rate / 100, rate % 100),
+            );
+        } else {
+            let _ = rate_text.push_str("Refresh: -- Hz");
+        }
+        let _ = Text::with_baseline(
+            rate_text.as_str(),
+            Point::new(190, 225),
+            frame_style,
+            Baseline::Top,
+        )
+        .draw(display);
+        return;
+    }
+
+    let wifi_text = match link_state {
+        EspLinkState::SerialReady => "ESP: AT ready",
+        EspLinkState::WifiConnected => "WiFi: connected",
+        EspLinkState::Failed => "ESP: failed",
+    };
+    let upload_text = match upload_state {
+        UploadState::Disabled => "Upload: disabled",
+        UploadState::Idle => "Upload: idle",
+        UploadState::Ok => "Upload: ok",
+        UploadState::Failed => "Upload: failed",
+    };
+
+    let mut frame_buf: String<24> = String::new();
+    let _ = core::fmt::write(&mut frame_buf, format_args!("Samples: {}", sample_count));
+
+    let _ =
+        Text::with_baseline(wifi_text, Point::new(4, 225), wifi_style, Baseline::Top).draw(display);
+    let _ = Text::with_baseline(
+        upload_text,
+        Point::new(110, 225),
+        upload_style,
+        Baseline::Top,
+    )
+    .draw(display);
+    let _ = Text::with_baseline(
+        frame_buf.as_str(),
+        Point::new(210, 225),
+        frame_style,
+        Baseline::Top,
+    )
+    .draw(display);
 }
 
 /// 应用程序入口
@@ -108,6 +241,12 @@ fn main() -> ! {
         .pll1_q_ck(400.MHz())
         .freeze(pwrcfg, &dp.SYSCFG);
 
+    let clock = Clock(
+        dp.TIM2
+            .tick_timer(1.MHz(), ccdr.peripheral.TIM2, &ccdr.clocks),
+    );
+    let mut sensor_delay = |ms| clock.delay_ms(ms);
+
     // ============================================================
     // 第二阶段：GPIO 配置
     // ============================================================
@@ -123,6 +262,57 @@ fn main() -> ! {
     // LED 指示灯 - 用于显示系统状态
     // 正常运行时会闪烁，读取传感器成功时也会闪烁
     let mut led = gpioa.pa1.into_push_pull_output();
+
+    // ESP8266-01S 串口（USART3）
+    // PB10 -> ESP RX
+    // PB11 <- ESP TX
+    let esp_tx_pin = gpiob.pb10.into_alternate::<7>();
+    let esp_rx_pin = gpiob.pb11.into_alternate::<7>();
+    let esp_serial = dp
+        .USART3
+        .serial(
+            (esp_tx_pin, esp_rx_pin),
+            ESP8266_UART_BAUD.bps(),
+            ccdr.peripheral.USART3,
+            &ccdr.clocks,
+        )
+        .unwrap();
+    let (esp_tx, esp_rx) = esp_serial.split();
+    let mut esp8266 = Esp8266::new(esp_tx, esp_rx);
+    let mut esp_ready = false;
+    let mut esp_wifi_connected = false;
+    let upload_endpoint = HttpEndpoint {
+        host: ESP8266_HTTP_HOST,
+        port: ESP8266_HTTP_PORT,
+        path: ESP8266_HTTP_PATH,
+    };
+    let mut esp_upload_enabled =
+        !upload_endpoint.host.is_empty() && !upload_endpoint.path.is_empty();
+    let mut esp_upload_state = if esp_upload_enabled {
+        UploadState::Idle
+    } else {
+        UploadState::Disabled
+    };
+
+    let mut esp_link_state = if ESP8266_ENABLED {
+        match esp8266.initialize(&mut delay_ms, ESP8266_WIFI_SSID, ESP8266_WIFI_PASSWORD) {
+            Ok(status) => {
+                esp_ready = true;
+                esp_wifi_connected = status.connected;
+                if status.connected {
+                    EspLinkState::WifiConnected
+                } else {
+                    EspLinkState::SerialReady
+                }
+            },
+            Err(_) => {
+                // 允许系统先跑起来，后续在主循环中继续重试连接 ESP
+                EspLinkState::Failed
+            },
+        }
+    } else {
+        EspLinkState::SerialReady
+    };
 
     // ============================================================
     // 第三阶段：屏幕初始化
@@ -156,7 +346,7 @@ fn main() -> ! {
     // 启动动画：LED 快闪表示正在初始化
     for _ in 0..10 {
         led.toggle();
-        delay_ms(50);
+        sensor_delay(50);
     }
 
     // 打开屏幕背光
@@ -173,21 +363,15 @@ fn main() -> ! {
         &ccdr.clocks,
     );
 
-    // 初始化帧缓冲区
-    // 帧缓冲位于 AXISRAM（D2 域的 SRAM），DMA 可以直接访问
-    display::init_frame_buffer();
-
-    // 创建并初始化显示驱动
-    let mut display = DisplayDriver::new(spi, disp_cs, disp_dc);
-    display.init(&mut delay_ms);
-
-    // 设置横屏模式
-    // 横屏更适合显示温湿度信息，可以并排显示两个卡片
-    display.set_orientation(DisplayOrientation::Landscape);
-
-    // 清屏为白色背景
-    display.clear(Rgb565::WHITE).unwrap();
-    display.flush();
+    // The display owns and initializes its AXISRAM buffers once.
+    let mut display = DisplayDriver::with_orientation(
+        spi,
+        disp_cs,
+        disp_dc,
+        &clock,
+        DisplayOrientation::Landscape,
+    );
+    let mut display_ready = display.init(&mut sensor_delay).is_ok();
 
     // ============================================================
     // 第四阶段：传感器初始化
@@ -206,86 +390,8 @@ fn main() -> ! {
         &ccdr.clocks,
     );
 
-    // 初始化 AHT20 温湿度传感器
-    let mut aht20 = aht20::Aht20::new(i2c);
-    let mut _aht20_ok = false;
-
-    match aht20.init() {
-        Ok(_) => {
-            let screen = Screen::new(display.width() as u32, display.height() as u32)
-                .with_theme(GrayTheme::new());
-            let mut screen = screen;
-
-            let _ = screen.add_label(Label::new(160, 80, "AHT20 INIT SUCCESS").centered());
-            let _ = screen.draw_with_dma(&mut display);
-            delay_ms(1000);
-            // AHT20 初始化成功，LED 闪烁一次
-            _aht20_ok = true;
-            led.set_high();
-            delay_ms(100);
-            led.set_low();
-        },
-        Err(_) => {
-            // AHT20 初始化失败，在屏幕上显示错误
-            let screen = Screen::new(display.width() as u32, display.height() as u32)
-                .with_theme(GrayTheme::new());
-            let mut screen = screen;
-
-            let _ = screen.add_label(Label::new(160, 100, "AHT20 INIT FAILED").centered());
-            let _ = screen.add_label(Label::new(160, 130, "Check I2C Connection").centered());
-            let _ = screen.draw_with_dma(&mut display);
-
-            // LED 快闪 3 次
-            for _ in 0..3 {
-                led.set_high();
-                delay_ms(100);
-                led.set_low();
-                delay_ms(100);
-            }
-        },
-    }
-
-    // 初始化 BMP280 气压传感器
-    // BMP280 有两个可能的 I2C 地址：0x76 和 0x77
-    let i2c = aht20.release();
-    let mut bmp280 = bmp280::Bmp280::new(i2c);
-    let mut _bmp280_ok = false;
-
-    match bmp280.init() {
-        Ok(_) => {
-            // BMP280 初始化成功
-            _bmp280_ok = true;
-            for _ in 0..2 {
-                led.set_high();
-                delay_ms(100);
-                led.set_low();
-                delay_ms(100);
-            }
-        },
-        Err(_) => {
-            // BMP280 初始化失败，在屏幕上显示错误
-            let screen = Screen::new(display.width() as u32, display.height() as u32)
-                .with_theme(GrayTheme::new());
-            let mut screen = screen;
-
-            let _ = screen.add_label(Label::new(160, 80, "BMP280 INIT FAILED").centered());
-            let _ = screen.add_label(Label::new(160, 110, "Check I2C Wiring").centered());
-            let _ = screen.draw_with_dma(&mut display);
-
-            // LED 快闪 4 次
-            for _ in 0..4 {
-                led.set_high();
-                delay_ms(100);
-                led.set_low();
-                delay_ms(100);
-            }
-        },
-    }
-
-    // 释放 I2C 并重新创建 AHT20 实例用于后续读取
-    // 注意：Bmp280 的 release() 现在不会销毁实例，校准数据得以保留
-    let i2c = bmp280.release();
-    aht20 = aht20::Aht20::new(i2c);
+    let mut i2c = BoundedI2c::new(i2c, &clock);
+    let mut sensors = Sensors::default();
 
     // ============================================================
     // 第五阶段：创建 UI 界面
@@ -326,159 +432,148 @@ fn main() -> ! {
     let pressure_card = PressureCard::new(215, 20).with_theme(GrayTheme::new());
     let _ = screen.add_pressure_card(pressure_card);
 
-    // 绘制初始界面
-    screen.draw_with_dma(&mut display).unwrap();
-
-    // ============================================================
-    // 第六阶段：主循环
-    // ============================================================
-    //
-    // 主循环负责：
-    // 1. 定期读取 AHT20 传感器数据
-    // 2. 更新 UI 显示
-    // 3. LED 状态指示
-
-    let mut frame_count: u32 = 0;
-    let mut last_sensor_read: u32 = 0;
-
-    fn draw_frame_count<D>(display: &mut D, frame: u32)
-    where
-        D: embedded_graphics::prelude::DrawTarget<Color = embedded_graphics::pixelcolor::Rgb565>,
-    {
-        use embedded_graphics::{
-            mono_font::{ascii::FONT_10X20, MonoTextStyle},
-            prelude::*,
-            text::{Baseline, Text},
-        };
-
-        let mut buf = [0u8; 12];
-        let len;
-
-        if frame == 0 {
-            buf[0] = b'0';
-            len = 1;
-        } else {
-            let mut temp = frame;
-            let mut temp_len = 0;
-            while temp > 0 {
-                temp_len += 1;
-                temp /= 10;
-            }
-
-            len = temp_len;
-            let mut n = frame;
-            let mut idx = temp_len;
-            while n > 0 {
-                idx -= 1;
-                buf[idx] = b'0' + (n % 10) as u8;
-                n /= 10;
-            }
-        }
-
-        let frame_str = unsafe { core::str::from_utf8_unchecked(&buf[..len]) };
-
-        let style = MonoTextStyle::new(&FONT_10X20, embedded_graphics::pixelcolor::Rgb565::BLACK);
-        let text = Text::with_baseline(frame_str, Point::new(280, 210), style, Baseline::Top);
-
-        let _ = text.draw(display);
+    screen.update_sensors(temp_sensor, humid_sensor, pressure_sensor);
+    if display_ready {
+        display_ready = screen.draw_with_dma(&mut display).is_ok();
+        screen.clear_dirty();
     }
 
+    const SAMPLE_INTERVAL_US: u32 = 5_000_000;
+    let now = clock.now_us();
+    // Take the first sample immediately, then keep hardware-clock deadlines.
+    let mut samples = Periodic::new(now.wrapping_sub(SAMPLE_INTERVAL_US), SAMPLE_INTERVAL_US);
+    let mut heartbeat = Periodic::new(now, 1_000_000);
+    let mut status_refresh = Periodic::new(now.wrapping_sub(1_000_000), 1_000_000);
+    let mut sample_count: u32 = 0;
+    let mut refresh_rate = RefreshRate::new(now);
+
     loop {
-        frame_count += 1;
-
-        // 每 5 秒读取一次传感器
-        // 300 帧 × 16ms ≈ 4.8 秒
-        if frame_count - last_sensor_read > 300 {
-            last_sensor_read = frame_count;
-
-            // 读取 AHT20 温湿度
-            match aht20.read() {
+        refresh_rate.poll(clock.now_us());
+        if samples.due(clock.now_us()) {
+            sample_count = sample_count.wrapping_add(1);
+            let readings = sensors.sample(&mut i2c, &mut sensor_delay);
+            let aht_result = readings.climate;
+            match aht_result {
                 Ok(reading) => {
-                    // 读取成功！
-                    // LED 闪烁一次表示数据更新
-                    led.toggle();
-
-                    // 更新传感器数据
                     temp_sensor.update_temp(reading.temperature);
                     humid_sensor.update_humid(reading.humidity);
+                    let now = clock.now_us();
+                    temp_sensor.mark_updated(now);
+                    humid_sensor.mark_updated(now);
+                },
+                Err(_) => {
+                    temp_sensor.mark_failed();
+                    humid_sensor.mark_failed();
+                },
+            }
 
-                    // 释放 AHT20 的 I2C 总线，重新挂载到依然存活的 bmp280 实例上
-                    let i2c = aht20.release();
-                    bmp280.attach(i2c);
+            let bmp_result = readings.pressure;
+            match bmp_result {
+                Ok(reading) => {
+                    pressure_sensor.update(reading.pressure);
+                    pressure_sensor.mark_updated(clock.now_us());
+                },
+                Err(_) => {
+                    pressure_sensor.mark_failed();
+                },
+            }
+            screen.update_sensors(temp_sensor, humid_sensor, pressure_sensor);
+            if display_ready {
+                let has_updates = !screen.dirty_rects.is_empty();
+                display_ready = screen.draw_sensor_updates(&mut display).is_ok();
+                if display_ready && has_updates {
+                    refresh_rate.record_success();
+                }
+            }
 
-                    // 读取 BMP280 气压（此时它的 is_initialized 是 true，且包含全部校准数据）
-                    match bmp280.read() {
-                        Ok(bmp_reading) => {
-                            // 更新气压数据
-                            pressure_sensor.update(bmp_reading.pressure);
-                        },
-                        Err(_) => {
-                            // BMP280 读取失败，保持上次的值
-                        },
+            if ESP8266_ENABLED {
+                if let Ok(reading) = aht_result {
+                    if !esp_ready {
+                        if let Ok(status) = esp8266.initialize(
+                            &mut delay_ms,
+                            ESP8266_WIFI_SSID,
+                            ESP8266_WIFI_PASSWORD,
+                        ) {
+                            esp_ready = true;
+                            esp_wifi_connected = status.connected;
+                            esp_link_state = if status.connected {
+                                EspLinkState::WifiConnected
+                            } else {
+                                EspLinkState::SerialReady
+                            };
+                            esp_upload_state = if esp_upload_enabled {
+                                UploadState::Idle
+                            } else {
+                                UploadState::Disabled
+                            };
+                        } else {
+                            esp_link_state = EspLinkState::Failed;
+                        }
                     }
 
-                    // 用完后释放出来，再交还给 AHT20
-                    let i2c = bmp280.release();
-                    aht20 = aht20::Aht20::new(i2c);
+                    if esp_ready && esp_upload_enabled {
+                        let payload = SensorPayload {
+                            temperature: reading.temperature,
+                            humidity: reading.humidity,
+                            pressure: pressure_sensor.pressure_current,
+                        };
 
-                    // 更新屏幕显示：先清空控件，然后重新添加带新数据的卡片
-                    screen.widgets.clear();
-
-                    // 创建带新数据的卡片（3列布局）
-                    let temp_card = TempHumidCard::new(5, 20, true).with_theme(GrayTheme::new());
-                    let mut temp_card_with_data = temp_card;
-                    temp_card_with_data.sensor = temp_sensor;
-
-                    let humid_card =
-                        TempHumidCard::new(110, 20, false).with_theme(GrayTheme::new());
-                    let mut humid_card_with_data = humid_card;
-                    humid_card_with_data.sensor = humid_sensor;
-
-                    let pressure_card = PressureCard::new(215, 20).with_theme(GrayTheme::new());
-                    let mut pressure_card_with_data = pressure_card;
-                    pressure_card_with_data.sensor = pressure_sensor;
-
-                    let _ = screen.add_temp_humd_card(temp_card_with_data);
-                    let _ = screen.add_temp_humd_card(humid_card_with_data);
-                    let _ = screen.add_pressure_card(pressure_card_with_data);
-                    let _ = screen.draw_with_dma(&mut display);
-                },
-                Err(e) => {
-                    // AHT20 读取失败，在屏幕上显示错误
-                    screen.widgets.clear();
-
-                    // 显示具体的错误信息
-                    let error_msg = match e {
-                        aht20::Aht20Error::I2cError => "I2C ERROR",
-                        aht20::Aht20Error::NotCalibrated => "NOT CALIBRATED",
-                        aht20::Aht20Error::Busy => "SENSOR BUSY",
-                        aht20::Aht20Error::InvalidData => "INVALID DATA",
-                    };
-
-                    let _ = screen.add_label(Label::new(160, 80, "AHT20 READ ERROR").centered());
-                    let _ = screen.add_label(Label::new(160, 110, error_msg).centered());
-                    let _ = screen.draw_with_dma(&mut display);
-
-                    // LED 快闪表示错误
-                    for _ in 0..3 {
-                        led.toggle();
-                        delay_ms(100);
+                        match esp8266.send_sensor_data(&mut delay_ms, upload_endpoint, payload) {
+                            Ok(_) => {
+                                esp_upload_state = UploadState::Ok;
+                                if let Ok(status) = esp8266.query_wifi(&mut delay_ms) {
+                                    esp_wifi_connected = status.connected;
+                                    esp_link_state = if status.connected {
+                                        EspLinkState::WifiConnected
+                                    } else {
+                                        EspLinkState::SerialReady
+                                    };
+                                }
+                            },
+                            Err(Esp8266Error::InvalidConfig) => {
+                                esp_upload_enabled = false;
+                                esp_upload_state = UploadState::Disabled;
+                            },
+                            Err(_) => {
+                                esp_ready = false;
+                                esp_wifi_connected = false;
+                                esp_link_state = EspLinkState::Failed;
+                                esp_upload_state = UploadState::Failed;
+                            },
+                        }
                     }
-                },
+                }
             }
         }
 
-        // 在屏幕右下角显示 frame_count
-        draw_frame_count(&mut display, frame_count);
-
-        // 心跳指示
-        // LED 每秒闪烁一次，表示系统正常运行
-        if frame_count % 60 == 0 {
-            led.toggle();
+        if status_refresh.due(clock.now_us()) {
+            if !display_ready {
+                // A failed partial transfer is retried as a full initialization/frame.
+                display_ready = display.init(&mut sensor_delay).is_ok()
+                    && screen.draw_with_dma(&mut display).is_ok();
+                if display_ready {
+                    screen.clear_dirty();
+                    refresh_rate.record_success();
+                }
+            }
+            if display_ready {
+                draw_status(
+                    &mut display,
+                    esp_link_state,
+                    esp_upload_state,
+                    sample_count,
+                    refresh_rate.centihz(),
+                );
+                display_ready = display.flush_rect(0, 220, 320, 20).is_ok();
+            }
         }
-
-        // 帧率控制
-        // 约 60fps，提供流畅的视觉体验
-        delay_ms(16);
+        if heartbeat.due(clock.now_us()) {
+            if !ESP8266_ENABLED || esp_wifi_connected {
+                led.toggle();
+            } else {
+                led.set_low();
+            }
+        }
+        sensor_delay(1);
     }
 }

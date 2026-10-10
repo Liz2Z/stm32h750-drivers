@@ -117,6 +117,20 @@ impl TempHumidCard {
         let icon_y = self.y + 35;
         icon.draw(display, icon_x, icon_y, 2, self.theme.g0)?;
 
+        self.draw_values(display)
+    }
+
+    /// Static titles, icons and borders stay in the framebuffer.
+    pub fn values_bounds(&self) -> BoundingBox {
+        BoundingBox::new(self.x + 1, self.y + 75, self.width - 2, 115)
+    }
+
+    pub fn draw_values<D>(&self, display: &mut D) -> Result<(), D::Error>
+    where
+        D: DrawTarget<Color = Rgb565>,
+    {
+        display.fill_solid(&self.values_bounds().into_rectangle(), self.theme.g7)?;
+        let style = MonoTextStyle::new(&FONT_10X20, self.theme.g0);
         // 5. 绘制当前数值
         let value_str = if self.show_temp {
             self.sensor.temp_str()
@@ -136,7 +150,12 @@ impl TempHumidCard {
 
         // 6. 绘制最高/最低值
         use core::fmt::Write;
-        let (high, low) = if self.show_temp {
+        let (high, low) = if self.sensor.history_count == 0 {
+            (
+                heapless::String::<16>::from("hi:--"),
+                heapless::String::<16>::from("lo:--"),
+            )
+        } else if self.show_temp {
             (
                 {
                     let mut s = heapless::String::<16>::new();
@@ -179,6 +198,14 @@ impl TempHumidCard {
             Baseline::Top,
         );
         low_text.draw(display)?;
+
+        Text::with_baseline(
+            self.sensor.state.label(),
+            Point::new(self.x + 10, self.y + 170),
+            style,
+            Baseline::Top,
+        )
+        .draw(display)?;
 
         Ok(())
     }

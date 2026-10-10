@@ -1,24 +1,24 @@
-//! # 纯 Rust UI 框架 (DMA 优化版本)
+//! # 纯 Rust 帧缓冲 UI 框架
 //!
-//! 轻量级嵌入式 UI 库，针对 DMA 传输优化。
+//! 轻量级嵌入式 UI 库，将绘制与硬件传输分离。
 //! 提供基础控件：按钮、标签、进度条等。
 //!
-//! ## DMA 优化特性
+//! ## 刷新优化特性
 //! - 脏矩形跟踪，只重绘变化区域
-//! - 批量 DMA 传输
+//! - 通过 FlushTarget 进行批量传输
 //! - 控件使用 fill_solid 进行大面积填充
 
 mod bounding_box;
 mod icons;
 mod screen;
-mod sensor;
+use crate::sensor;
 mod theme;
 mod widgets;
 
 // 重新导出所有公共类型
 pub use bounding_box::BoundingBox;
 pub use icons::PixelIcon;
-pub use screen::Screen;
+pub use screen::{FlushTarget, Screen};
 pub use sensor::{PressureSensor, TempHumidSensor};
 pub use theme::GrayTheme;
 pub use widgets::{Button, HistoryBar, Label, PressureCard, ProgressBar, TempHumidCard, Widget};

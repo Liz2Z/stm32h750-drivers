@@ -7,7 +7,7 @@
 use embedded_graphics::{prelude::*, primitives::Rectangle};
 
 /// 边界框结构
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BoundingBox {
     pub x: i32,
     pub y: i32,

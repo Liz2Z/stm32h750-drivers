@@ -1,7 +1,27 @@
-//! 温湿度传感器数据
+//! 传感器读数、统计和有效性。
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SampleState {
+    #[default]
+    Pending,
+    Fresh,
+    Stale,
+    Error,
+}
+
+impl SampleState {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Pending => "WAIT",
+            Self::Fresh => "",
+            Self::Stale => "STALE",
+            Self::Error => "ERROR",
+        }
+    }
+}
 
 /// 温湿度传感器数据
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq)]
 pub struct TempHumidSensor {
     /// 当前温度 (°C)
     pub temp_current: f32,
@@ -19,6 +39,8 @@ pub struct TempHumidSensor {
     pub history: [f32; 6],
     /// 历史记录计数
     pub history_count: usize,
+    pub state: SampleState,
+    pub last_success_us: Option<u32>,
 }
 
 impl TempHumidSensor {
@@ -33,16 +55,22 @@ impl TempHumidSensor {
             humid_low: 0.0,
             history: [0.0; 6],
             history_count: 0,
+            state: SampleState::Pending,
+            last_success_us: None,
         }
     }
 
     /// 更新温度数据
     pub fn update_temp(&mut self, temp: f32) {
+        if !temp.is_finite() {
+            return;
+        }
+        self.state = SampleState::Fresh;
         self.temp_current = temp;
-        if temp > self.temp_high || self.temp_high == 0.0 {
+        if temp > self.temp_high || self.history_count == 0 {
             self.temp_high = temp;
         }
-        if temp < self.temp_low || self.temp_low == 0.0 {
+        if temp < self.temp_low || self.history_count == 0 {
             self.temp_low = temp;
         }
         self.add_history(temp);
@@ -50,14 +78,31 @@ impl TempHumidSensor {
 
     /// 更新湿度数据
     pub fn update_humid(&mut self, humid: f32) {
+        if !humid.is_finite() {
+            return;
+        }
+        self.state = SampleState::Fresh;
         self.humid_current = humid;
-        if humid > self.humid_high || self.humid_high == 0.0 {
+        if humid > self.humid_high || self.history_count == 0 {
             self.humid_high = humid;
         }
-        if humid < self.humid_low || self.humid_low == 0.0 {
+        if humid < self.humid_low || self.history_count == 0 {
             self.humid_low = humid;
         }
         self.add_history(humid);
+    }
+
+    pub fn mark_updated(&mut self, now_us: u32) {
+        self.last_success_us = Some(now_us);
+        self.state = SampleState::Fresh;
+    }
+
+    pub fn mark_failed(&mut self) {
+        self.state = if self.history_count == 0 {
+            SampleState::Error
+        } else {
+            SampleState::Stale
+        };
     }
 
     /// 添加历史记录
@@ -76,6 +121,9 @@ impl TempHumidSensor {
 
     /// 格式化温度字符串
     pub fn temp_str(&self) -> heapless::String<16> {
+        if self.history_count == 0 {
+            return heapless::String::from("--.-C");
+        }
         use core::fmt::Write;
         let mut s = heapless::String::new();
         if write!(s, "{:.1}C", self.temp_current).is_ok() {
@@ -87,6 +135,9 @@ impl TempHumidSensor {
 
     /// 格式化湿度字符串
     pub fn humid_str(&self) -> heapless::String<16> {
+        if self.history_count == 0 {
+            return heapless::String::from("--%");
+        }
         use core::fmt::Write;
         let mut s = heapless::String::new();
         if write!(s, "{}%", self.humid_current as i32).is_ok() {
@@ -98,7 +149,7 @@ impl TempHumidSensor {
 }
 
 /// 气压传感器数据
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq)]
 pub struct PressureSensor {
     /// 当前气压 (hPa)
     pub pressure_current: f32,
@@ -110,6 +161,8 @@ pub struct PressureSensor {
     pub history: [f32; 6],
     /// 历史记录计数
     pub history_count: usize,
+    pub state: SampleState,
+    pub last_success_us: Option<u32>,
 }
 
 impl PressureSensor {
@@ -121,19 +174,38 @@ impl PressureSensor {
             pressure_low: 0.0,
             history: [0.0; 6],
             history_count: 0,
+            state: SampleState::Pending,
+            last_success_us: None,
         }
     }
 
     /// 更新气压数据
     pub fn update(&mut self, pressure: f32) {
+        if !pressure.is_finite() {
+            return;
+        }
+        self.state = SampleState::Fresh;
         self.pressure_current = pressure;
-        if pressure > self.pressure_high || self.pressure_high == 0.0 {
+        if pressure > self.pressure_high || self.history_count == 0 {
             self.pressure_high = pressure;
         }
-        if pressure < self.pressure_low || self.pressure_low == 0.0 {
+        if pressure < self.pressure_low || self.history_count == 0 {
             self.pressure_low = pressure;
         }
         self.add_history(pressure);
+    }
+
+    pub fn mark_updated(&mut self, now_us: u32) {
+        self.last_success_us = Some(now_us);
+        self.state = SampleState::Fresh;
+    }
+
+    pub fn mark_failed(&mut self) {
+        self.state = if self.history_count == 0 {
+            SampleState::Error
+        } else {
+            SampleState::Stale
+        };
     }
 
     /// 添加历史记录
@@ -152,6 +224,9 @@ impl PressureSensor {
 
     /// 格式化气压字符串
     pub fn pressure_str(&self) -> heapless::String<16> {
+        if self.history_count == 0 {
+            return heapless::String::from("----hPa");
+        }
         use core::fmt::Write;
         let mut s = heapless::String::new();
         if write!(s, "{:.0}hPa", self.pressure_current).is_ok() {

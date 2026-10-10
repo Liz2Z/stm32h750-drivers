@@ -7,6 +7,13 @@
 use super::{BoundingBox, GrayTheme, ProgressBar, Widget};
 use embedded_graphics::{pixelcolor::Rgb565, prelude::*};
 
+/// A draw target whose framebuffer can be sent to a physical display.
+pub trait FlushTarget: DrawTarget<Color = Rgb565> {
+    type FlushError: From<Self::Error>;
+    fn flush(&mut self) -> Result<(), Self::FlushError>;
+    fn flush_rect(&mut self, x: u16, y: u16, w: u16, h: u16) -> Result<(), Self::FlushError>;
+}
+
 /// 屏幕/容器
 pub struct Screen {
     pub widgets: heapless::Vec<Widget, 8>,
@@ -164,12 +171,9 @@ impl Screen {
     }
 
     /// 使用 DMA 绘制整个屏幕
-    pub fn draw_with_dma(
-        &self,
-        display: &mut crate::display::DisplayDriver,
-    ) -> Result<(), core::convert::Infallible> {
+    pub fn draw_with_dma<D: FlushTarget>(&self, display: &mut D) -> Result<(), D::FlushError> {
         // 清屏 - 使用帧缓冲
-        display.clear(self.theme.background());
+        display.clear(self.theme.background())?;
 
         // 绘制所有控件（绘制到帧缓冲）
         for widget in &self.widgets {
@@ -177,21 +181,28 @@ impl Screen {
         }
 
         // 刷新到屏幕
-        display.flush();
+        display.flush()?;
 
         Ok(())
     }
 
     /// 使用 DMA 只绘制指定 ID 的进度条
-    pub fn draw_progress_bar_only_with_dma(
+    pub fn draw_progress_bar_only_with_dma<D: FlushTarget>(
         &self,
-        display: &mut crate::display::DisplayDriver,
+        display: &mut D,
         id: u32,
-    ) -> Result<(), core::convert::Infallible> {
+    ) -> Result<(), D::FlushError> {
         for widget in &self.widgets {
             if let Widget::ProgressBar(pb) = widget {
                 if pb.id == id {
-                    return pb.draw(display);
+                    pb.draw(display)?;
+                    let bb = pb.bounding_box();
+                    return display.flush_rect(
+                        bb.x as u16,
+                        bb.y as u16,
+                        bb.width as u16,
+                        bb.height as u16,
+                    );
                 }
             }
         }
@@ -201,11 +212,11 @@ impl Screen {
     /// 使用 DMA 局部更新进度条（优化版本）
     ///
     /// 只重绘进度条区域，不清屏
-    pub fn update_progress_bar_with_dma(
+    pub fn update_progress_bar_with_dma<D: FlushTarget>(
         &self,
-        display: &mut crate::display::DisplayDriver,
+        display: &mut D,
         id: u32,
-    ) -> Result<(), core::convert::Infallible> {
+    ) -> Result<(), D::FlushError> {
         for widget in &self.widgets {
             if let Widget::ProgressBar(pb) = widget {
                 if pb.id == id {
@@ -225,12 +236,95 @@ impl Screen {
                     pb.draw(display)?;
 
                     // 局部刷新
-                    display.flush_rect(bb.x as u16, bb.y as u16, bb.width as u16, bb.height as u16);
+                    display.flush_rect(
+                        bb.x as u16,
+                        bb.y as u16,
+                        bb.width as u16,
+                        bb.height as u16,
+                    )?;
 
                     return Ok(());
                 }
             }
         }
+        Ok(())
+    }
+    /// Update persistent cards and mark only their dynamic interior regions.
+    pub fn update_sensors(
+        &mut self,
+        temp: super::TempHumidSensor,
+        humid: super::TempHumidSensor,
+        pressure: super::PressureSensor,
+    ) {
+        for widget in &mut self.widgets {
+            let dirty = match widget {
+                Widget::TempHumidCard(card) => {
+                    let next = if card.show_temp { temp } else { humid };
+                    let prev = card.sensor;
+                    let changed = prev.state != next.state
+                        || if card.show_temp {
+                            prev.temp_current != next.temp_current
+                                || prev.temp_high != next.temp_high
+                                || prev.temp_low != next.temp_low
+                        } else {
+                            prev.humid_current != next.humid_current
+                                || prev.humid_high != next.humid_high
+                                || prev.humid_low != next.humid_low
+                        };
+                    card.update(next);
+                    if changed {
+                        Some(card.values_bounds())
+                    } else {
+                        None
+                    }
+                },
+                Widget::PressureCard(card) => {
+                    let prev = card.sensor;
+                    let changed = prev.state != pressure.state
+                        || prev.pressure_current != pressure.pressure_current
+                        || prev.pressure_high != pressure.pressure_high
+                        || prev.pressure_low != pressure.pressure_low;
+                    card.update(pressure);
+                    if changed {
+                        Some(card.values_bounds())
+                    } else {
+                        None
+                    }
+                },
+                _ => None,
+            };
+            if let Some(rect) = dirty {
+                if !self.dirty_rects.contains(&rect) {
+                    let _ = self.dirty_rects.push(rect);
+                }
+            }
+        }
+    }
+
+    pub fn draw_sensor_updates<D: FlushTarget>(
+        &mut self,
+        display: &mut D,
+    ) -> Result<(), D::FlushError> {
+        for widget in &self.widgets {
+            match widget {
+                Widget::TempHumidCard(card) if self.dirty_rects.contains(&card.values_bounds()) => {
+                    card.draw_values(display)?;
+                },
+                Widget::PressureCard(card) if self.dirty_rects.contains(&card.values_bounds()) => {
+                    card.draw_values(display)?;
+                },
+                _ => {},
+            }
+        }
+        for rect in &self.dirty_rects {
+            display.flush_rect(
+                rect.x as u16,
+                rect.y as u16,
+                rect.width as u16,
+                rect.height as u16,
+            )?;
+        }
+        self.clear_dirty();
         Ok(())
     }
 }

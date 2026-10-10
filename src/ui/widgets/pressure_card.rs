@@ -114,6 +114,20 @@ impl PressureCard {
             self.theme.g0,
         )?;
 
+        self.draw_values(display)
+    }
+
+    /// Static titles, icons and borders stay in the framebuffer.
+    pub fn values_bounds(&self) -> BoundingBox {
+        BoundingBox::new(self.x + 1, self.y + 75, self.width - 2, 115)
+    }
+
+    pub fn draw_values<D>(&self, display: &mut D) -> Result<(), D::Error>
+    where
+        D: DrawTarget<Color = Rgb565>,
+    {
+        display.fill_solid(&self.values_bounds().into_rectangle(), self.theme.g7)?;
+        let style = MonoTextStyle::new(&FONT_10X20, self.theme.g0);
         // 5. 绘制当前气压值
         let value_str = self.sensor.pressure_str();
         let value_text = Text::with_baseline(
@@ -131,12 +145,20 @@ impl PressureCard {
         use core::fmt::Write;
         let high = {
             let mut s = heapless::String::<16>::new();
-            let _ = write!(s, "hi:{:.0}", self.sensor.pressure_high);
+            if self.sensor.history_count == 0 {
+                let _ = s.push_str("hi:--");
+            } else {
+                let _ = write!(s, "hi:{:.0}", self.sensor.pressure_high);
+            }
             s
         };
         let low = {
             let mut s = heapless::String::<16>::new();
-            let _ = write!(s, "lo:{:.0}", self.sensor.pressure_low);
+            if self.sensor.history_count == 0 {
+                let _ = s.push_str("lo:--");
+            } else {
+                let _ = write!(s, "lo:{:.0}", self.sensor.pressure_low);
+            }
             s
         };
 
@@ -155,6 +177,14 @@ impl PressureCard {
             Baseline::Top,
         );
         low_text.draw(display)?;
+
+        Text::with_baseline(
+            self.sensor.state.label(),
+            Point::new(self.x + 10, self.y + 170),
+            style,
+            Baseline::Top,
+        )
+        .draw(display)?;
 
         Ok(())
     }
