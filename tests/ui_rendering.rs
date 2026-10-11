@@ -161,3 +161,71 @@ fn animation_only_changes_its_strip_and_skips_late_frames_across_wrap() {
     animation.refresh(&mut panel, 6_750_000).unwrap();
     assert_eq!(panel.visible, reference.visible);
 }
+
+#[test]
+fn footer_message_stays_in_footer_and_clears_long_uid_when_replaced() {
+    use stm32h750_drivers::ui::status::{
+        draw_status_with_message, StatusData, StatusMessage, StatusTone,
+    };
+    let mut panel = Panel::new();
+    screen().draw_with_dma(&mut panel).unwrap();
+    let original = panel.framebuffer.clone();
+    let data = StatusData {
+        connection: None,
+        sample_count: 42,
+        refresh_centihz: Some(5920),
+    };
+    let long = "Last UID: 04 01 02 03 04 05 06 07 08 09";
+    draw_status_with_message(
+        &mut panel,
+        data,
+        Some(StatusMessage {
+            text: long,
+            tone: StatusTone::Muted,
+        }),
+    );
+    assert_eq!(panel.framebuffer[..220 * 320], original[..220 * 320]);
+    let short = StatusMessage {
+        text: "UID: DE AD BE EF",
+        tone: StatusTone::Success,
+    };
+    draw_status_with_message(&mut panel, data, Some(short));
+    let mut fresh = Panel::new();
+    screen().draw_with_dma(&mut fresh).unwrap();
+    draw_status_with_message(&mut fresh, data, Some(short));
+    assert_eq!(panel.framebuffer, fresh.framebuffer);
+}
+
+#[test]
+fn rfid_page_clears_previous_content_and_switching_back_restores_sensor_pixels() {
+    use stm32h750_drivers::ui::{
+        rfid_page::{draw_rfid_page, RfidPageData},
+        status::{StatusMessage, StatusTone},
+    };
+    let mut panel = Panel::new();
+    let view = screen();
+    view.draw_with_dma(&mut panel).unwrap();
+    let sensors = panel.framebuffer.clone();
+    let data = |uid| RfidPageData {
+        status: StatusMessage {
+            text: "Card detected",
+            tone: StatusTone::Success,
+        },
+        uid,
+        uid_caption: "Card UID",
+    };
+    draw_rfid_page(&mut panel, data("04 01 02 03 04 05 06 07 08 09")).unwrap();
+    assert_ne!(panel.framebuffer, sensors);
+    assert_eq!(panel.framebuffer[..20 * 320], sensors[..20 * 320]);
+    assert_eq!(panel.framebuffer[220 * 320..], sensors[220 * 320..]);
+    draw_rfid_page(&mut panel, data("7C 22 40 2E")).unwrap();
+    let mut fresh = Panel::new();
+    view.draw_with_dma(&mut fresh).unwrap();
+    draw_rfid_page(&mut fresh, data("7C 22 40 2E")).unwrap();
+    assert_eq!(
+        panel.framebuffer, fresh.framebuffer,
+        "切换短卡号后不得残留长卡号或传感器卡片"
+    );
+    view.draw_with_dma(&mut panel).unwrap();
+    assert_eq!(panel.framebuffer, sensors, "切回环境页必须完整恢复卡片");
+}

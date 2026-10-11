@@ -8,6 +8,8 @@
 | [acquisition/mod.rs](acquisition/mod.rs) | 持有驱动、记录及计数；一次 `sample` 完成读取、失败处理和更新；提供结果快照 |
 | [acquisition/record.rs](acquisition/record.rs) | 采集组件私有的记录实现，校验数值并维护极值、历史、状态和成功时间戳 |
 | [runtime.rs](runtime.rs) | 调度采集、动画、显示恢复、底栏更新和可选通信 |
+| [rfid.rs](rfid.rs) | 200ms 轮询 RC522、故障重试、保留最近成功 UID；不负责寄存器或绘图 |
+| [navigation.rs](navigation.rs) | K1 / K2 电平消抖、按下事件和演示页面选择；不操作 GPIO 或绘图 |
 | [presentation.rs](presentation.rs) | 将采集快照转换为 UI 声明的卡片输入，将连接状态转换为底栏标签 |
 | [scheduling.rs](scheduling.rs) | 判断周期期限，统计成功刷新率 |
 | [connection.rs](connection.rs) | 连接与上传流程状态枚举 |
@@ -28,6 +30,13 @@ runtime：期限到了
 UI 在控件中定义自己需要的 `TempHumidCardData`、`PressureCardData` 和 `StatusData`。
 `presentation` 同时认识采集快照和控件输入，承担转换；UI 无需导入采集组件、记录实现
 或 ESP 状态。卡片输入不携带历史和时间戳，因此仅这些信息变化不会触发重绘。
+
+读卡同样遵守这个方向：`CardReader` 持有 RC522 驱动和读卡流程状态，
+`presentation::reader_status` 和 `uid_text` 将状态、UID 转为文字与提示色，再交给 UI 的
+`RfidPageData`。UI 不认识 RC522 或 `ReaderState`。K1 上一页，K2 下一页，首尾循环；
+底栏第一行显示按键提示，第二行显示采样次数与刷新率，取代可选连接标签。
+卡移开后显示 `Last UID`，表示上次读到的卡，不冒充当前仍在场。
+页面顺序在 `navigation.rs` 的 `PAGES` 中声明。页面选择只决定画面和刷新区域，采集与读卡在两页都继续运行。
 
 采集与转换可在宿主机测试，硬件配置和运行入口由 ARM 条件编译隔离。
 `make test` 同时运行模块单元测试和根目录集成测试，`make check-host` 检查宿主机库与全部测试，

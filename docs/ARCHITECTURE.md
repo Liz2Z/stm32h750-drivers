@@ -2,6 +2,8 @@
 
 本项目运行在 STM32H750VB 上，通过共享 I2C1 采集 AHT20 温湿度与 BMP280 气压，
 使用 SPI2 驱动 ILI9341 横屏显示。普通固件每 5 秒采样，顶部动画约 60Hz，ESP8266 默认关闭。
+RC522 单卡读号演示使用独立 SPI1，每 200ms 查询。K1（PE3）上一页，
+K2（PC5）下一页，首尾循环，RST 保持复位；接线见 [读卡演示](RC522_DEMO.md)。
 
 ## 分层与依赖
 
@@ -108,6 +110,15 @@ DMA FIFO 暂时饥饿与实际传输错误分开处理，细节及实板故障�
 
 ## 测试边界
 
+读卡协议在 `drivers/rc522.rs`，有界 SPI1 交换和复位在 `bsp/rc522.rs`，
+重试、最近成功 UID 与在场状态在 `application/rfid.rs`。应用转换后向 UI 传入
+`RfidPageData`，UI 不依赖读卡业务。按键 GPIO 在 `bsp/buttons.rs`，30ms 消抖和
+页面选择在 `application/navigation.rs`。隐藏页面的设备继续运行，环境页切回时完整重画，
+避免 RFID 内容残留；两页底栏显示按键提示、采样次数和刷新率。
+读卡错误不会阻止其他任务执行，器件空场等待
+使用 5ms 硬件定时器及 10ms 软件兜底；初始化复位另有 52ms 稳定等待。
+这些有界阻塞仍可能造成短暂跳帧，不能据此宣称永久停机已解决。
+
 单元测试归对应模块：记录、格式化、调度、显示转换、AHT20、BMP280 的测试内联在
 源码的 `tests` 子模块；已有实现目录的显示驱动使用 `drivers/display/tests.rs`。
 单文件模块无需为了测试另建同名目录。
@@ -129,6 +140,7 @@ CI 的宿主机测试作业复用 Makefile，说明见 [测试文档](../tests/R
 | `make flash` | 普通固件构建、烧录与校验 |
 | `make bench-flash` | 独立目录构建并烧录测速固件 |
 | `make debug` / `make bench-read` | 在测速完成后读取结果 |
+| `make diagnose` | 在已有调试连接上保存停机现场，不复位；使用与板上固件一致的 ELF |
 
 烧录与调试沿用 OpenOCD/GDB，不强制使用 probe-rs。
 测速变量用 UnsafeCell 包装，GDB 读取路径为

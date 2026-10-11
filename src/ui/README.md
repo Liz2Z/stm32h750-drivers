@@ -11,6 +11,8 @@
 | [widgets/pressure_card.rs](widgets/pressure_card.rs) | `PressureCardData` | hPa 数值范围和提示状态 |
 | [widgets/value.rs](widgets/value.rs) | `ValueRange`、`ValueStatus` | 数值控件共用的输入结构与显示提示 |
 | [status.rs](status.rs) | `StatusData` | 连接标签、上传标签、颜色提示、采样次数和刷新率 |
+| [status.rs](status.rs) | `StatusMessage` | 调用方提供的一行文字与提示色；用于底栏第一行，UI 无需知道文字来自读卡器 |
+| [rfid_page.rs](rfid_page.rs) | `RfidPageData` | 状态文字、提示色、卡号文字与标题；不依赖 RC522 或应用的页面枚举 |
 
 卡片的 `values: None` 表示显示占位符，`Some` 可以包含真实的零值。
 `ValueStatus` 决定显示 WAIT、STALE、ERROR 或空提示；采样状态如何映射，由应用完成。
@@ -20,6 +22,10 @@
 
 [application/presentation.rs](../application/presentation.rs) 将采集快照和连接状态
 转换为上述类型，再交给 `Screen::update_sensors` 或 `draw_status`。
+`draw_status_with_message` 在现有 320×20 底栏内显示两行，保留采样次数和刷新率；
+传入 `None` 时保留原底栏布局和像素。每次清理整个底栏，长卡号换成短提示不会留残字。
+普通固件的底栏提示 K1 / K2；读卡内容放在独立的 y=20..219 页面主体，
+`draw_rfid_page` 只绘图，由应用选择页面并刷新。切回环境页调用原 `Screen` 完整重画。
 转换使用 UI 声明的接口，不能在 UI 中加入 `From<ReadingSnapshot>` 或应用模块的导入。
 控件也可以由测试、演示或其他应用直接构造输入，不需要创建采样记录。
 

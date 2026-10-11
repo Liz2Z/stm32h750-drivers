@@ -13,6 +13,7 @@ AHT20 的设备地址、命令和读数换算由这里的驱动决定。
 |---|---|---|
 | [aht20.rs](aht20.rs) | AHT20 温湿度传感器 | embedded-hal I2C trait；初始化、测量、状态检查和数据换算 |
 | [bmp280.rs](bmp280.rs) | BMP280 气压传感器 | embedded-hal I2C trait；芯片识别、校准参数和补偿计算 |
+| [rc522.rs](rc522.rs) | MFRC522 读卡器 | 有界 `Interface`；SPI 寄存器帧、WUPA、防碰撞、SELECT、CRC_A、HALT 和 4/7/10 字节 UID |
 | [dht11.rs](dht11.rs) | DHT11 温湿度传感器 | 泛型输入/输出引脚；预留驱动，普通固件未使用 |
 | [esp8266.rs](esp8266.rs) | ESP8266 串口协处理器 | 泛型串口收发；普通固件默认关闭其通信流程 |
 | [serial.rs](serial.rs) | 通用串口输出辅助 | embedded-hal 串口 trait；字符串和数字输出，不配置 USART 引脚 |

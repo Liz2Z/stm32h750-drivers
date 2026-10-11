@@ -18,6 +18,7 @@ pub mod dht11;
 pub mod display;
 #[cfg(target_arch = "arm")]
 pub mod esp8266;
+pub mod rc522;
 #[cfg(target_arch = "arm")]
 pub mod serial;
 

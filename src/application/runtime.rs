@@ -3,16 +3,24 @@ use super::{
     acquisition::Acquisition,
     config::*,
     connection::{EspLinkState, UploadState},
+    navigation::{DemoPage, Navigation},
     presentation,
+    rfid::CardReader,
     scheduling::{Periodic, RefreshRate},
 };
 use crate::{
     bsp::{
         board::Board,
         clock::{delay_ms, Clock},
+        display::DisplayDriver,
+        rc522::Rc522Spi,
     },
     drivers::{Esp8266Error, HttpEndpoint, SensorPayload},
-    ui::{status::draw_status, FlowAnimation, GrayTheme, PressureCard, Screen, TempHumidCard},
+    ui::{
+        rfid_page::{draw_rfid_page, RfidPageData},
+        status::{draw_status_with_message, StatusMessage},
+        FlowAnimation, GrayTheme, PressureCard, Screen, TempHumidCard,
+    },
 };
 use core::convert::Infallible;
 
@@ -22,6 +30,8 @@ pub fn run(board: Board<'_>, clock: &Clock) -> Infallible {
         mut i2c,
         mut esp8266,
         mut led,
+        rc522,
+        buttons,
         ..
     } = board;
     let mut sensor_delay = |ms| clock.delay_ms(ms);
@@ -102,8 +112,12 @@ pub fn run(board: Board<'_>, clock: &Clock) -> Infallible {
     let mut refresh_rate = RefreshRate::new(now);
     let mut animation = FlowAnimation::new(now);
     let mut animation_tick = Periodic::new(now, 16_667);
+    let mut reader = CardReader::new(rc522, now);
+    let mut navigation = Navigation::default();
 
     loop {
+        let page_changed = navigation.poll(buttons.pressed(), clock.now_us());
+        let reader_changed = reader.poll(|| clock.now_us());
         refresh_rate.poll(clock.now_us());
         if samples.due(clock.now_us()) {
             let readings = acquisition.sample(&mut i2c, &mut sensor_delay, &mut || clock.now_us());
@@ -113,7 +127,7 @@ pub fn run(board: Board<'_>, clock: &Clock) -> Infallible {
                 presentation::climate_card(&snapshot.humidity),
                 presentation::pressure_card(&snapshot.pressure),
             );
-            if display_ready {
+            if display_ready && navigation.page() == DemoPage::Sensors {
                 let has_updates = !screen.dirty_rects.is_empty();
                 display_ready = screen.draw_sensor_updates(&mut display).is_ok();
                 if display_ready && has_updates {
@@ -184,6 +198,18 @@ pub fn run(board: Board<'_>, clock: &Clock) -> Infallible {
             }
         }
 
+        if display_ready
+            && (page_changed || (reader_changed && navigation.page() == DemoPage::Rfid))
+        {
+            display_ready = draw_page(&mut display, &screen, navigation.page(), &reader);
+            if display_ready {
+                if navigation.page() == DemoPage::Sensors {
+                    screen.clear_dirty();
+                }
+                refresh_rate.record_success();
+            }
+        }
+
         if display_ready && animation_tick.due(clock.now_us()) {
             display_ready = animation.refresh(&mut display, clock.now_us()).is_ok();
             if display_ready {
@@ -191,18 +217,18 @@ pub fn run(board: Board<'_>, clock: &Clock) -> Infallible {
             }
         }
 
-        if status_refresh.due(clock.now_us()) {
+        if status_refresh.due(clock.now_us()) || page_changed {
             if !display_ready {
                 // 局部传输失败后，重新初始化并完整重绘。
                 display_ready = display.init(&mut sensor_delay).is_ok()
-                    && screen.draw_with_dma(&mut display).is_ok();
+                    && draw_page(&mut display, &screen, navigation.page(), &reader);
                 if display_ready {
                     screen.clear_dirty();
                     refresh_rate.record_success();
                 }
             }
             if display_ready {
-                draw_status(
+                draw_status_with_message(
                     &mut display,
                     presentation::status_bar(
                         ESP8266_ENABLED,
@@ -211,6 +237,10 @@ pub fn run(board: Board<'_>, clock: &Clock) -> Infallible {
                         acquisition.snapshot().sample_count,
                         refresh_rate.centihz(),
                     ),
+                    Some(StatusMessage {
+                        text: "K1: Up   K2: Down",
+                        tone: crate::ui::status::StatusTone::Muted,
+                    }),
                 );
                 display_ready = display.flush_rect(0, 220, 320, 20).is_ok();
             }
@@ -223,5 +253,37 @@ pub fn run(board: Board<'_>, clock: &Clock) -> Infallible {
             }
         }
         sensor_delay(1);
+    }
+}
+
+fn draw_page(
+    display: &mut DisplayDriver<'_>,
+    screen: &Screen,
+    page: DemoPage,
+    reader: &CardReader<Rc522Spi<'_>>,
+) -> bool {
+    match page {
+        DemoPage::Sensors => screen.draw_with_dma(display).is_ok(),
+        DemoPage::Rfid => {
+            let status = presentation::reader_status(reader.state);
+            let uid = presentation::uid_text(reader.last_uid.as_ref());
+            draw_rfid_page(
+                display,
+                RfidPageData {
+                    status: StatusMessage {
+                        text: status.text,
+                        tone: status.tone,
+                    },
+                    uid: uid.as_str(),
+                    uid_caption: if reader.state == super::rfid::ReaderState::Present {
+                        "Card UID"
+                    } else {
+                        "Last UID"
+                    },
+                },
+            )
+            .is_ok()
+                && display.flush_rect(0, 20, 320, 200).is_ok()
+        },
     }
 }

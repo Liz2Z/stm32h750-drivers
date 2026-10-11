@@ -3,7 +3,9 @@ pub mod acquisition;
 #[cfg(target_arch = "arm")]
 pub mod config;
 pub mod connection;
+pub mod navigation;
 pub mod presentation;
+pub mod rfid;
 #[cfg(target_arch = "arm")]
 mod runtime;
 pub mod scheduling;

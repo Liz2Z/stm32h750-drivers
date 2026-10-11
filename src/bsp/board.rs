@@ -1,5 +1,8 @@
 //! Clock, GPIO and peripheral assembly for this STM32H750 board.
+use super::buttons::Buttons;
+use super::rc522::Rc522Spi;
 use super::{bounded_i2c::BoundedI2c, clock::Clock, display::DisplayDriver};
+use crate::drivers::rc522::Rc522;
 use crate::{
     bsp,
     drivers::{DisplayOrientation, Esp8266},
@@ -16,6 +19,8 @@ use stm32h7xx_hal::{
 pub struct Board<'a> {
     pub display: DisplayDriver<'a>,
     pub i2c: BoundedI2c<'a>,
+    pub rc522: Rc522<Rc522Spi<'a>>,
+    pub buttons: Buttons,
     pub esp8266: Esp8266<Tx<pac::USART3>, Rx<pac::USART3>>,
     pub led: PA1<Output<PushPull>>,
     #[cfg(feature = "display-bench")]
@@ -50,10 +55,36 @@ pub fn with_board(
     // GPIO 与外设仅在 BSP 中装配。
     let gpioa = dp.GPIOA.split(ccdr.peripheral.GPIOA);
     let gpiob = dp.GPIOB.split(ccdr.peripheral.GPIOB);
+    let gpioc = dp.GPIOC.split(ccdr.peripheral.GPIOC);
+    let gpioe = dp.GPIOE.split(ccdr.peripheral.GPIOE);
+    let buttons = Buttons::new(
+        gpioe.pe3.into_pull_up_input(),
+        gpioc.pc5.into_pull_up_input(),
+    );
 
     // LED 指示灯 - 用于显示系统状态
     // 正常运行时会闪烁，读取传感器成功时也会闪烁
     let mut led = gpioa.pa1.into_push_pull_output();
+
+    // RC522 独占 SPI1：PA5=SCK、PA6=MISO、PA7=MOSI，MODE_0。
+    // 请求 1 MHz；400 MHz 内核 / 256，实际为 1.5625 MHz（低于器件 10 MHz 上限）。
+    let reader_spi = dp.SPI1.spi(
+        (
+            gpioa.pa5.into_alternate::<5>(),
+            gpioa.pa6.into_alternate::<5>(),
+            gpioa.pa7.into_alternate::<5>(),
+        ),
+        spi::Config::new(spi::MODE_0),
+        1.MHz(),
+        ccdr.peripheral.SPI1,
+        &ccdr.clocks,
+    );
+    let rc522 = Rc522::new(Rc522Spi::new(
+        reader_spi,
+        gpioa.pa4.into_push_pull_output(),
+        gpioa.pa3.into_push_pull_output(),
+        &clock,
+    ));
 
     // ESP8266-01S 串口（USART3）
     // PB10 -> ESP RX
@@ -141,6 +172,8 @@ pub fn with_board(
     let board = Board {
         display,
         i2c,
+        rc522,
+        buttons,
         esp8266,
         led,
         #[cfg(feature = "display-bench")]

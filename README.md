@@ -48,6 +48,10 @@
 | PB1 | DC | 数据/命令选择 |
 | PB0 | BLK | 背光控制 |
 
+RC522 接线与读卡操作见 [RC522 读卡演示](docs/RC522_DEMO.md)。它使用 SPI1，
+K1（PE3）上一页，K2（PC5）下一页，首尾循环；RST 保持复位；
+原传感器卡片与配色保留，底栏继续显示刷新率。
+
 ### LED 状态指示
 
 | 引脚 | 说明 |
@@ -138,6 +142,8 @@ src/
 ├── lib.rs                   # 固件、示例与测试共用的模块入口
 ├── application/
 │   ├── runtime.rs           # 采集、动画、显示恢复的调度主循环
+│   ├── navigation.rs        # 用户键消抖与演示页面选择
+│   ├── rfid.rs              # 读卡、退避重试、最近成功 UID
 │   ├── acquisition/
 │   │   ├── mod.rs           # 持有驱动、记录、计数，提供采集与只读快照
 │   │   └── record.rs        # 私有记录：校验、历史、极值和状态
@@ -147,6 +153,7 @@ src/
 │   └── config.rs            # 应用配置，ESP 默认关闭
 ├── drivers/
 │   ├── aht20.rs / bmp280.rs # 基于 embedded-hal 的传感器协议
+│   ├── rc522.rs             # 寄存器协议和 ISO14443A UID
 │   └── display/
 │       ├── mod.rs           # DisplayInterface 传输接口
 │       ├── ili9341.rs       # 控制器协议、绘图和区域刷新
@@ -158,6 +165,8 @@ src/
 │   ├── board.rs             # STM32H750 时钟、引脚与外设所有权
 │   ├── clock.rs             # TIM2 微秒时钟
 │   ├── bounded_i2c.rs       # I2C 事务期限和恢复
+│   ├── buttons.rs           # K1 / K2 上拉输入
+│   ├── rc522.rs             # 独占 SPI1 / CS / RST 的有界交换
 │   ├── adc_ntc.rs           # 预留 ADC 驱动
 │   ├── profiler.rs          # 可选 DWT 计时
 │   └── display/
@@ -169,6 +178,7 @@ src/
 │   ├── screen.rs            # 控件布局、脏区域和显示适配
 │   ├── sensor_format.rs     # 单位、占位符、状态文字
 │   ├── status.rs            # 底栏状态与刷新率
+│   ├── rfid_page.rs         # 独立读卡页面的文字输入与绘图
 │   ├── flow_animation.rs    # 顶部动画
 │   ├── theme.rs             # 原配色
 │   └── widgets/             # 卡片等控件；各自定义输入类型

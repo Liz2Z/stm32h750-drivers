@@ -11,7 +11,7 @@ pub enum StatusTone {
 }
 
 impl StatusTone {
-    fn color(self) -> Rgb565 {
+    pub(super) fn color(self) -> Rgb565 {
         match self {
             Self::Normal => Rgb565::BLACK,
             Self::Success => Rgb565::new(0, 40, 0),
@@ -41,8 +41,26 @@ pub struct StatusData {
     pub refresh_centihz: Option<u32>,
 }
 
+/// 可选的单行提示；调用方控制文字，最多 52 个 ASCII 字符。
+/// 提示占第一行，采样次数和刷新率占第二行；连接标签在此布局下隐藏。
+#[derive(Clone, Copy)]
+pub struct StatusMessage<'a> {
+    pub text: &'a str,
+    pub tone: StatusTone,
+}
+
 pub fn draw_status<D>(display: &mut D, data: StatusData)
 where
+    D: embedded_graphics::prelude::DrawTarget<Color = Rgb565>,
+{
+    draw_status_with_message(display, data, None);
+}
+
+pub fn draw_status_with_message<D>(
+    display: &mut D,
+    data: StatusData,
+    message: Option<StatusMessage<'_>>,
+) where
     D: embedded_graphics::prelude::DrawTarget<Color = Rgb565>,
 {
     use embedded_graphics::{
@@ -59,12 +77,19 @@ where
 
     let frame_style = MonoTextStyle::new(&FONT_6X10, Rgb565::BLACK);
 
-    let Some(connection) = data.connection else {
+    if let Some(message) = message {
+        let style = MonoTextStyle::new(&FONT_6X10, message.tone.color());
+        let _ = Text::with_baseline(message.text, Point::new(4, 220), style, Baseline::Top)
+            .draw(display);
+    }
+    let line_y = if message.is_some() { 230 } else { 225 };
+
+    let Some(connection) = data.connection.filter(|_| message.is_none()) else {
         let mut text: String<24> = String::new();
         let _ = core::fmt::write(&mut text, format_args!("Samples: {}", data.sample_count));
         let _ = Text::with_baseline(
             text.as_str(),
-            Point::new(4, 225),
+            Point::new(4, line_y),
             frame_style,
             Baseline::Top,
         )
@@ -80,7 +105,7 @@ where
         }
         let _ = Text::with_baseline(
             rate_text.as_str(),
-            Point::new(190, 225),
+            Point::new(190, line_y),
             frame_style,
             Baseline::Top,
         )

@@ -11,6 +11,7 @@
 mod bounding_box;
 mod flow_animation;
 mod icons;
+pub mod rfid_page;
 mod screen;
 pub(crate) mod sensor_format;
 pub mod status;

@@ -2,6 +2,7 @@
 use super::{
     acquisition::{ReadingSnapshot, SampleState},
     connection::{EspLinkState, UploadState},
+    rfid::ReaderState,
 };
 use crate::ui::{
     status::{ConnectionLabels, StatusData, StatusLabel, StatusTone},
@@ -14,6 +15,36 @@ fn values(series: &ReadingSnapshot) -> Option<ValueRange> {
         high: values.high,
         low: values.low,
     })
+}
+
+/// 在应用侧格式化卡号；UI 只接收文字和提示色，不依赖 RC522 驱动类型。
+pub fn reader_status(state: ReaderState) -> StatusLabel {
+    let (label, tone) = match state {
+        ReaderState::Starting => ("Starting reader", StatusTone::Muted),
+        ReaderState::Waiting => ("Waiting for card", StatusTone::Normal),
+        ReaderState::Present => ("Card detected", StatusTone::Success),
+        ReaderState::Collision => ("Use one card at a time", StatusTone::Failure),
+        ReaderState::InitFailed => ("RC522: check wiring", StatusTone::Failure),
+        ReaderState::ReadFailed => ("Read error / retrying", StatusTone::Failure),
+    };
+    StatusLabel { text: label, tone }
+}
+
+/// 驱动的 UID 转为 UI 所需文字，32 字节容量覆盖最长 10 字节卡号及分隔符。
+pub fn uid_text(uid: Option<&crate::drivers::rc522::Uid>) -> heapless::String<32> {
+    use core::fmt::Write;
+    let mut text = heapless::String::new();
+    if let Some(uid) = uid {
+        for (index, byte) in uid.as_bytes().iter().enumerate() {
+            if index != 0 {
+                let _ = text.push(' ');
+            }
+            let _ = write!(text, "{byte:02X}");
+        }
+    } else {
+        let _ = text.push_str("-- -- -- --");
+    }
+    text
 }
 
 fn status(series: &ReadingSnapshot) -> ValueStatus {

@@ -13,6 +13,8 @@ BSP 是 **Board Support Package（板级支持包）**。本目录绑定当前 S
 | [board.rs](board.rs) | 获取外设所有权，配置电源、400MHz 时钟和 GPIO，装配显示、I2C、串口、LED |
 | [clock.rs](clock.rs) | 基于 TIM2 的微秒计数、期限判断和延时 |
 | [bounded_i2c.rs](bounded_i2c.rs) | 为具体的 I2C1 控制器实现有超时、可恢复的 embedded-hal 总线接口 |
+| [rc522.rs](rc522.rs) | SPI1 全双工交换、PA4 片选、PA3 复位；寄存器交换上限 1ms，失败释放 CS 并恢复控制器 |
+| [buttons.rs](buttons.rs) | K1=PE3、K2=PC5，上拉输入、按下接地；只读电平，不决定页面 |
 | [adc_ntc.rs](adc_ntc.rs) | 预留的 PA3 模拟引脚封装；当前尚未实现 ADC 采集和温度换算 |
 | [profiler.rs](profiler.rs) | `profiler` 特性下的 Cortex-M DWT 性能计时 |
 | [display/mod.rs](display/mod.rs) | 实板显示类型别名和 `new_display` 装配入口 |
@@ -47,8 +49,13 @@ main.rs
       → application::run(board, &clock)
 ```
 
-`Board` 将显示、I2C、串口和 LED 的所有权交给应用。时钟留在 `with_board` 的栈帧中，
-显示与 I2C 借用它；应用循环持续运行，因此这些借用一直有效，不需要全局可变时钟。
+`Board` 将显示、I2C、RC522、串口和 LED 的所有权交给应用。时钟留在 `with_board` 的栈帧中，
+显示、I2C 与 RC522 传输借用它；应用循环持续运行，因此这些借用一直有效，不需要全局可变时钟。
+
+RC522 使用 PA5/PA6/PA7 的 SPI1 MODE_0，实际 1.5625MHz；SDA 标记的引脚接 PA4，
+在当前模块的 SPI 模式下它是片选，不是 I2C 数据线。RST 接 PA3，因此预留 NTC 的
+PA3 模拟输入不能同时启用。RC522 不占用 SPI2、I2C1 或 DMA1。
+完整接线与验收见 [读卡演示](../../docs/RC522_DEMO.md)。
 
 显示装配时，BSP 把 `Spi2Display` 和两个独占缓冲交给通用
 `drivers::display::DisplayDriver<T>`。BSP 提供的 `DisplayDriver<'a>` 是这个泛型类型

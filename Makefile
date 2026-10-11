@@ -1,4 +1,4 @@
-.PHONY: all build examples flash debug clean bin test check check-host check-bench check-features fmt bench-build bench-flash bench-read
+.PHONY: all build examples flash debug diagnose clean bin test check check-host check-bench check-features fmt bench-build bench-flash bench-read
 
 GDB_PORT := 3333
 
@@ -39,6 +39,11 @@ flash: build
 
 debug:
 	openocd -f interface/stlink.cfg -f target/stm32h7x.cfg -c "gdb_port $(GDB_PORT)"
+
+# 先运行 make debug；保留停机现场到 target/hang.log，不重新烧录或重启。
+diagnose:
+	arm-none-eabi-gdb -q -batch target/thumbv7em-none-eabihf/release/stm32h750-drivers \
+		-ex 'target extended-remote :$(GDB_PORT)' -x scripts/capture-hang.gdb
 
 # Separate output keeps the normal ELF available for restoring the application.
 bench-build:
