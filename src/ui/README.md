@@ -12,7 +12,7 @@
 | [widgets/value.rs](widgets/value.rs) | `ValueRange`、`ValueStatus` | 数值控件共用的输入结构与显示提示 |
 | [status.rs](status.rs) | `StatusData` | 连接标签、上传标签、颜色提示、采样次数和刷新率 |
 | [status.rs](status.rs) | `StatusMessage` | 调用方提供的一行文字与提示色；用于底栏第一行，UI 无需知道文字来自读卡器 |
-| [rfid_page.rs](rfid_page.rs) | `RfidPageData` | 状态文字、提示色、卡号文字与标题；不依赖 RC522 或应用的页面枚举 |
+| [rfid_page.rs](rfid_page.rs) | `RfidPageData` | 状态、卡号、兼容类型、协议参数与内存进度文字；不依赖 RC522 或应用的页面枚举 |
 
 卡片的 `values: None` 表示显示占位符，`Some` 可以包含真实的零值。
 `ValueStatus` 决定显示 WAIT、STALE、ERROR 或空提示；采样状态如何映射，由应用完成。

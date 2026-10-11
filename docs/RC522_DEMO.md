@@ -8,7 +8,7 @@ K1 对应 PE3、K2 对应 PC5，均为按下接地，BSP 开启内部上拉。
 物料表第 3 页列出 K1、K2、RST 三个开关。RST 直接接 NRST，无法当普通 GPIO 键使用。
 
 按键连续稳定 30ms 才接受，长按只触发一次；两键同时按住时不切页。
-环境页保留原三张卡片和配色；RFID 页独立显示状态与卡号。
+环境页保留原三张卡片和配色；RFID 页独立显示状态、卡号、兼容卡型、ATQA/SAK 与内存扫描进度。
 两页底栏都有按键提示、采样次数与刷新率，顶部继续显示动画。
 切页只改变画面，传感器每 5s 采样、读卡每 200ms 查询，均继续在后台执行。
 
@@ -36,11 +36,11 @@ SPI1 使用 MODE_0、8 位、MSB-first，400MHz 内核 / 256，实际 1.5625MHz�
 - `bsp/buttons.rs` 读物理电平，`application/navigation.rs` 消抖并选择页面。
 - `drivers/rc522.rs` 管理寄存器帧、WUPA、单卡防碰撞、SELECT、BCC / CRC_A 和 HALT。
 - `bsp/rc522.rs` 独占 SPI1、CS、RST，执行有期限的交换和控制器恢复。
-- `application/rfid.rs` 管理重试、在场状态和最近成功 UID。
+- `application/rfid.rs` 管理重试、在场状态、最近卡片参数及逐块内存快照。
 - `application/presentation.rs` 转换标签和卡号文字；`ui/rfid_page.rs` 只接收 UI 输入。
 
 支持 ISO14443A 的 4 / 7 / 10 字节 UID；每次成功后 HALT，下次 WUPA 可再次读取停留的卡。
-当前演示为单卡读号，碰撞返回错误；不读写卡片数据区，不执行密钥认证。
+当前为单卡检查，碰撞返回错误；支持 Classic Mini / 1K / 4K 布局的只读检查，其他卡型只显示公开参数。
 卡在场显示 `Card detected` 和 `Card UID`；移开后显示 `Waiting for card` 和 `Last UID`，
 保留上次成功卡号。未读到卡时显示占位符。
 初始化失败显示 `RC522: check wiring`；读卡失败显示 `Read error / retrying`。
@@ -78,3 +78,47 @@ K1 返回环境页，三项读数仍更新、卡片没有残留；重复切页�
 执行 `make diagnose` 保存调用栈、CPU / SCB / 总线状态到 `target/hang.log`。
 必须使用与板上固件一致的 ELF。脚本不烧录、不复位；读取后删除断点、恢复 CPU 并退出。
 这只是诊断入口，不能代替查清停机原因。
+
+## 卡片信息与只读内存检查
+
+`read_card` 保留 UID、ATQA（空口字节序）和最后一级 SAK。SAK 仅用于初步判断兼容类型，
+不证明卡片品牌、芯片真伪或物业使用的数据格式。Classic 1K 推定为 16 扇区、64 个 16 字节块。
+`read_uid` 保留为只返回 UID 的兼容入口。
+
+`read_classic_block` 由调用者传入块地址、Key A/B 类型和 6 字节密钥。驱动每次重新选卡、
+核对 UID/ATQA/SAK，再通过 MFRC522 的 MFAuthent 认证，发 READ 0x30，验证 16 字节数据的 CRC_A。
+成功后在 Crypto1 开启时 HALT，再关闭 Crypto1；失败也尝试停止命令、清理位帧配置与加密状态。
+硬件/总线故障要求重新初始化。卡移开、换卡、认证失败、4 位 NAK 和 CRC 错误分别返回，
+驱动不保存、猜测密钥，也没有写卡命令。
+
+应用每 200ms 最多读取一个块、尝试一次认证。只使用出厂密钥 `FF FF FF FF FF FF`：
+先试 Key A，无法读取时下一轮试同一密钥的 Key B；读取失败保留明确状态，不用全零代替成功。
+卡一直贴近时，1K 卡约 13 秒完成全部 A 读取；全部需要 A/B 两次尝试时约 26 秒，另计通信和调度开销。
+卡移开暂停并保留快照，同一 UID 再放回继续；换一张卡重新开始。完成后不反复扫描，复位可重新读取。
+两张卡即使 UID/ATQA/SAK 完全相同也无法靠这些参数区分，不能把此核对当作身份认证。
+Classic 4K 的容量根据 SAK 推定，尚无对应实卡验证；7 字节 UID 的认证有协议 mock 覆盖，尚无实卡验证。
+
+屏幕 `Read` 表示实际读取成功的块数，`Scanned` 包含成功和已尝试失败的块；
+`Default key failed` 表示该块的 A/B 默认密钥认证均未成功，不表示已确认其实际密钥。
+原始快照中的状态分为 Pending、ReadWithA、ReadWithB、DefaultKeyFailed、ReadDenied 和 ReadFailed。
+总容量含制造商块与扇区控制块，不等于用户数据容量。
+扇区控制块的 Key A 不能被直接读取，返回的零值是掩码；Key B 是否可见由访问位决定。
+读到原始数据也不等于能解释房号、姓名或有效期，门禁权限可能只保存在管理系统中。
+
+先在另一个终端运行 `make debug`，使用与板上固件一致的 ELF 执行 `make rfid-read`，
+保存卡片参数、状态、全部块结果和 CFSR 到本地 `target/rfid-read.log`。
+命令短暂停机取得一致快照，结束后恢复 CPU；它不复位、不重新烧录，也不是连续串口监听。
+主机必须能通过 SWD 找到运行中的应用栈帧。内联导致栈深度变化时，脚本逐帧寻找 `reader`。
+读卡日志只留在已忽略的 `target/`，不自动提交真实卡片数据。
+
+协议依据另见 [NXP MIFARE Classic EV1 1K](https://www.nxp.com/docs/en/data-sheet/MF1S50YYX_V1.pdf)
+的认证、READ、扇区控制块与访问位说明，以及 MFRC522 数据手册 10.3.1.9 的 MFAuthent。
+
+2026-10-11 本次实卡检查：一张 4 字节 UID、ATQA `04 00`、SAK `08` 的 1K 兼容卡，
+64/64 块通过默认 Key A 认证并读取，CRC 校验通过，47 个普通数据块均为零；
+16 个控制块的访问位均为 `FF 07 80`、通用字节为 `69`。未发现可识别的门禁应用数据。
+这与按 UID 在后台查询权限的用法相符，但不能据此断言物业系统的实现。
+现场报告在本地 `target/rfid-card-report.txt` 与 `.json`，其中包含真实 UID 和逐块原始内容。
+
+本次共 46 项测试通过（37 项单元、9 项集成），宿主机、ARM 与全特性 Clippy、示例构建通过。
+最终固件已重新烧录校验，重新扫描仍为 64/64 块读取成功，CFSR=0；偶发停机问题仍需另行捕获。

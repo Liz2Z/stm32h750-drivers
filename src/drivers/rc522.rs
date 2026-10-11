@@ -1,4 +1,4 @@
-//! MFRC522：寄存器协议与 ISO14443A 单卡 UID 读取，不涉及 MCU 或界面。
+//! MFRC522：ISO14443A 选卡、公开参数与 MIFARE Classic 只读访问。
 //! 寄存器依据 NXP MFRC522 数据手册 Rev.3.9；选卡流程参照 miguelbalboa/rfid。
 
 /// 独占接口。exchange 在一次 CS 低电平内交换两个字节，含地址和数据。
@@ -20,6 +20,19 @@ pub enum Error<E> {
     Communication(u8),
     InvalidResponse,
     Checksum,
+    AuthenticationFailed,
+    NoResponse,
+    CardChanged,
+    UnsupportedCard,
+    InvalidBlock,
+    Nak(u8),
+}
+
+/// MIFARE Classic 扇区认证使用的密钥槽；驱动不保存或猜测密钥。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyType {
+    A,
+    B,
 }
 
 /// ISO14443A UID，实际长度为 4、7 或 10 字节；不代表卡片认证结果。
@@ -32,6 +45,38 @@ pub struct Uid {
 impl Uid {
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes[..self.len]
+    }
+}
+
+/// 选卡得到的公开信息。ATQA 保留空口字节序；SAK 不能证明芯片真伪。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CardInfo {
+    pub uid: Uid,
+    pub atqa: [u8; 2],
+    pub sak: u8,
+}
+
+impl CardInfo {
+    /// 根据最终 SAK 推定 Classic 布局，不适用于其他协议或真伪鉴定。
+    pub fn classic_blocks(&self) -> Option<u16> {
+        match self.sak {
+            0x09 => Some(20),
+            0x08 => Some(64),
+            0x18 => Some(256),
+            _ => None,
+        }
+    }
+
+    /// 按最终 SAK 初步识别兼容类型；不能据此确定生产商或门禁数据格式。
+    pub fn kind(&self) -> &'static str {
+        match self.sak {
+            0x09 => "MIFARE Mini compatible",
+            0x08 => "MIFARE Classic 1K compatible",
+            0x18 => "MIFARE Classic 4K compatible",
+            0x00 => "Ultralight / NTAG compatible",
+            0x20 => "ISO14443-4 compatible",
+            _ => "Unknown ISO14443A card",
+        }
     }
 }
 
@@ -132,11 +177,18 @@ impl<I: Interface> Rc522<I> {
                     return Err(Error::Communication(error));
                 }
                 let len = self.read(0x0a)? as usize;
-                if len == 0 || len > rx.len() || self.read(0x0c)? & 7 != 0 {
+                if len == 0 || len > rx.len() {
                     return Err(Error::InvalidResponse);
                 }
                 for byte in &mut rx[..len] {
                     *byte = self.read(0x09)?;
+                }
+                let tail_bits = self.read(0x0c)? & 7;
+                if len == 1 && tail_bits == 4 {
+                    return Err(Error::Nak(rx[0] & 0x0f));
+                }
+                if tail_bits != 0 {
+                    return Err(Error::InvalidResponse);
                 }
                 return Ok(Some(len));
             }
@@ -156,28 +208,45 @@ impl<I: Interface> Rc522<I> {
     /// Ok(None) 表示空场。计时回调必须持续递增（单位 µs），允许 u32 回绕。
     pub fn read_uid(
         &mut self,
-        mut now_us: impl FnMut() -> u32,
+        now_us: impl FnMut() -> u32,
     ) -> Result<Option<Uid>, Error<I::Error>> {
+        self.read_card(now_us).map(|card| card.map(|card| card.uid))
+    }
+
+    /// 与 read_uid 相同的单卡流程和阻塞上界，另外保留 ATQA 与最终 SAK。
+    pub fn read_card(
+        &mut self,
+        mut now_us: impl FnMut() -> u32,
+    ) -> Result<Option<CardInfo>, Error<I::Error>> {
         if !self.initialized {
             return Err(Error::NotInitialized);
         }
-        let result = self.select_uid(&mut now_us);
+        let result = self
+            .stop_crypto()
+            .and_then(|()| self.select_card(&mut now_us))
+            .and_then(|card| {
+                if card.is_some() {
+                    self.halt(&mut now_us)?;
+                }
+                Ok(card)
+            });
         if matches!(result, Err(Error::Interface(_) | Error::Timeout)) {
             self.initialized = false;
         }
         result
     }
 
-    fn select_uid(
+    fn select_card(
         &mut self,
         now_us: &mut impl FnMut() -> u32,
-    ) -> Result<Option<Uid>, Error<I::Error>> {
+    ) -> Result<Option<CardInfo>, Error<I::Error>> {
         let mut response = [0; 5];
         match self.transceive(&[0x52], 7, &mut response, now_us)? {
             None => return Ok(None),
             Some(2) => {},
             _ => return Err(Error::InvalidResponse),
         }
+        let atqa = [response[0], response[1]];
         let mut uid = Uid {
             bytes: [0; 10],
             len: 0,
@@ -215,18 +284,142 @@ impl<I: Interface> Rc522<I> {
                 return Err(Error::InvalidResponse);
             }
             if !cascade {
-                // HALT 的正常行为是不应答；收到响应反而是协议异常。
-                let crc = crc_a(&[0x50, 0]);
-                if self
-                    .transceive(&[0x50, 0, crc[0], crc[1]], 0, &mut response, now_us)?
-                    .is_some()
-                {
-                    return Err(Error::InvalidResponse);
-                }
-                return Ok(Some(uid));
+                let sak = response[0];
+                return Ok(Some(CardInfo { uid, atqa, sak }));
             }
         }
         Err(Error::InvalidResponse)
+    }
+
+    fn halt(&mut self, now_us: &mut impl FnMut() -> u32) -> Result<(), Error<I::Error>> {
+        // HALT 在 Crypto1 仍开启时发送，随后才能关闭加密；正常行为是不应答。
+        if self
+            .transceive(&[0x50, 0, 0x57, 0xcd], 0, &mut [0; 5], now_us)?
+            .is_some()
+        {
+            return Err(Error::InvalidResponse);
+        }
+        Ok(())
+    }
+
+    fn stop_crypto(&mut self) -> Result<(), Error<I::Error>> {
+        let status = self.read(0x08)?;
+        self.write(0x08, status & !8)
+    }
+
+    fn authenticate(
+        &mut self,
+        uid: &Uid,
+        block: u8,
+        key_type: KeyType,
+        key: &[u8; 6],
+        now_us: &mut impl FnMut() -> u32,
+    ) -> Result<(), Error<I::Error>> {
+        self.write(0x01, 0)?;
+        self.write(0x04, 0x7f)?;
+        self.write(0x0a, 0x80)?;
+        self.write(0x0d, 0)?;
+        let mut command = [0; 12];
+        command[0] = match key_type {
+            KeyType::A => 0x60,
+            KeyType::B => 0x61,
+        };
+        command[1] = block;
+        command[2..8].copy_from_slice(key);
+        // 完整选卡后的 Classic 认证使用 UID 最后四字节，包括七字节 UID 卡。
+        command[8..].copy_from_slice(&uid.as_bytes()[uid.len - 4..]);
+        for byte in command {
+            self.write(0x09, byte)?;
+        }
+        self.write(0x01, 0x0e)?;
+        let start = now_us();
+        let result = loop {
+            let irq = self.read(0x04)?;
+            if irq & 0x13 != 0 {
+                self.write(0x01, 0)?;
+                break if irq & 1 == 0 && self.read(0x06)? & 0x1f == 0 && self.read(0x08)? & 8 != 0 {
+                    Ok(())
+                } else {
+                    Err(Error::AuthenticationFailed)
+                };
+            }
+            if now_us().wrapping_sub(start) >= 10_000 {
+                break Err(Error::Timeout);
+            }
+        };
+        self.write(0x01, 0)?;
+        result
+    }
+
+    /// 独立只读会话：重新选卡并核对身份 → 指定密钥认证 → READ → HALT → 关闭 Crypto1。
+    /// 每次只读一个 16 字节块，不包含任何写卡命令。块地址必须符合卡型推定布局。
+    /// 最多 10 帧及一次认证，各等待硬件 5 ms / 软件 10 ms；接口耗时另计。
+    /// 卡移开、换卡、认证失败和访问拒绝分别返回错误，错误路径也清理命令与加密状态。
+    pub fn read_classic_block(
+        &mut self,
+        expected: &CardInfo,
+        block: u8,
+        key_type: KeyType,
+        key: &[u8; 6],
+        mut now_us: impl FnMut() -> u32,
+    ) -> Result<[u8; 16], Error<I::Error>> {
+        if !self.initialized {
+            return Err(Error::NotInitialized);
+        }
+        let count = expected.classic_blocks().ok_or(Error::UnsupportedCard)?;
+        if u16::from(block) >= count {
+            return Err(Error::InvalidBlock);
+        }
+        let mut selected = false;
+        let result = (|| {
+            self.stop_crypto()?;
+            let card = self.select_card(&mut now_us)?.ok_or(Error::NoResponse)?;
+            selected = true;
+            if card != *expected {
+                return Err(Error::CardChanged);
+            }
+            self.authenticate(&card.uid, block, key_type, key, &mut now_us)?;
+            let crc = crc_a(&[0x30, block]);
+            let mut response = [0; 18];
+            match self.transceive(
+                &[0x30, block, crc[0], crc[1]],
+                0,
+                &mut response,
+                &mut now_us,
+            )? {
+                None => return Err(Error::NoResponse),
+                Some(18) => {},
+                _ => return Err(Error::InvalidResponse),
+            }
+            if crc_a(&response[..16]) != response[16..] {
+                return Err(Error::Checksum);
+            }
+            let mut data = [0; 16];
+            data.copy_from_slice(&response[..16]);
+            Ok(data)
+        })();
+        let halt_result = if selected {
+            self.halt(&mut now_us)
+        } else {
+            Ok(())
+        };
+        // 即使 HALT 失败，也必须尝试关闭命令和 Crypto1，避免污染下一次 WUPA。
+        let idle = self.write(0x01, 0);
+        let framing = self.write(0x0d, 0);
+        let crypto = self.stop_crypto();
+        let cleanup = idle.and(framing).and(crypto);
+        let result = match (cleanup, halt_result, result) {
+            (Err(error), _, _) | (_, Err(error @ (Error::Interface(_) | Error::Timeout)), _) => {
+                Err(error)
+            },
+            (_, _, Err(error)) => Err(error),
+            (_, Err(error), _) => Err(error),
+            (_, _, Ok(data)) => Ok(data),
+        };
+        if matches!(result, Err(Error::Interface(_) | Error::Timeout)) {
+            self.initialized = false;
+        }
+        result
     }
 }
 
@@ -350,6 +543,19 @@ mod tests {
                         self.rx = reply.payload.into();
                         self.registers[0x04] = reply.irq;
                         self.registers[0x06] = reply.error;
+                        self.registers[0x0c] = if self.rx.len() == 1 { 4 } else { 0 };
+                    },
+                    0x01 if bytes[1] == 0x0e => {
+                        let reply = self.replies.pop_front().expect("出现额外认证命令");
+                        assert_eq!(self.tx, reply.tx);
+                        assert_eq!(self.tx.len(), 12);
+                        self.registers[0x04] = reply.irq;
+                        self.registers[0x06] = reply.error;
+                        self.registers[0x08] = if reply.irq == 0x10 && reply.error == 0 {
+                            8
+                        } else {
+                            0
+                        };
                     },
                     _ => {},
                 }
@@ -371,6 +577,136 @@ mod tests {
     fn crc_matches_known_halt_and_sak_vectors() {
         assert_eq!(crc_a(&[0x50, 0]), [0x57, 0xcd]);
         assert_eq!(crc_a(&[0x08]), [0xb6, 0xdd]);
+    }
+
+    fn selected_card(bus: &mut Bus, uid: &[u8]) -> CardInfo {
+        bus.card(uid);
+        bus.replies.pop_back(); // 单独会话暂不 HALT，接下来认证和读取。
+        let mut bytes = [0; 10];
+        bytes[..uid.len()].copy_from_slice(uid);
+        CardInfo {
+            uid: Uid {
+                bytes,
+                len: uid.len(),
+            },
+            atqa: [4, 0],
+            sak: 8,
+        }
+    }
+
+    fn auth(bus: &mut Bus, card: &CardInfo, key_type: KeyType, irq: u8) {
+        let mut tx = vec![if key_type == KeyType::A { 0x60 } else { 0x61 }, 1];
+        tx.extend_from_slice(&[0xff; 6]);
+        tx.extend_from_slice(&card.uid.as_bytes()[card.uid.len - 4..]);
+        bus.replies.push_back(Reply {
+            tx,
+            payload: vec![],
+            irq,
+            error: 0,
+        });
+    }
+
+    #[test]
+    fn card_parameters_and_classic_reads_preserve_crc_and_authenticate_last_uid_bytes() {
+        for uid in [&[0xde, 0xad, 0xbe, 0xef][..], &[4, 1, 2, 3, 4, 5, 6]] {
+            for key_type in [KeyType::A, KeyType::B] {
+                let mut bus = Bus::new();
+                let card = selected_card(&mut bus, uid);
+                auth(&mut bus, &card, key_type, 0x10);
+                let data = [0x5a; 16];
+                let mut response = data.to_vec();
+                response.extend_from_slice(&crc_a(&data));
+                let crc = crc_a(&[0x30, 1]);
+                bus.frame(&[0x30, 1, crc[0], crc[1]], &response);
+                bus.frame(&[0x50, 0, 0x57, 0xcd], &[]);
+                bus.card(uid);
+                let mut reader = reader(bus);
+                assert_eq!(
+                    reader.read_classic_block(&card, 1, key_type, &[0xff; 6], || 0),
+                    Ok(data)
+                );
+                assert_eq!(
+                    reader.interface.registers[8] & 8,
+                    0,
+                    "读取后必须关闭 Crypto1"
+                );
+                assert_eq!(reader.read_card(|| 0), Ok(Some(card)));
+                assert!(reader.interface.replies.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn authentication_failure_nak_checksum_and_stalled_auth_clean_up_and_allow_retry() {
+        for failure in [
+            Error::AuthenticationFailed,
+            Error::Nak(4),
+            Error::Checksum,
+            Error::Timeout,
+        ] {
+            let mut bus = Bus::new();
+            let card = selected_card(&mut bus, &[0xde, 0xad, 0xbe, 0xef]);
+            auth(
+                &mut bus,
+                &card,
+                KeyType::A,
+                match failure {
+                    Error::AuthenticationFailed => 1,
+                    Error::Timeout => 0,
+                    _ => 0x10,
+                },
+            );
+            if matches!(failure, Error::Nak(_) | Error::Checksum) {
+                let mut response = vec![0; 18];
+                if matches!(failure, Error::Nak(_)) {
+                    response = vec![4];
+                }
+                let crc = crc_a(&[0x30, 1]);
+                bus.frame(&[0x30, 1, crc[0], crc[1]], &response);
+            }
+            bus.frame(&[0x50, 0, 0x57, 0xcd], &[]);
+            bus.card(card.uid.as_bytes());
+            let mut reader = reader(bus);
+            let mut now = u32::MAX - 5_000;
+            assert_eq!(
+                reader.read_classic_block(&card, 1, KeyType::A, &[0xff; 6], || {
+                    now = now.wrapping_add(1_000);
+                    now
+                }),
+                Err(failure)
+            );
+            assert_eq!(reader.interface.registers[1], 0);
+            assert_eq!(reader.interface.registers[8] & 8, 0);
+            assert_eq!(reader.interface.registers[0x0d], 0);
+            if failure == Error::Timeout {
+                assert_eq!(reader.read_card(|| 0), Err(Error::NotInitialized));
+                reader.initialize().unwrap();
+            }
+            assert_eq!(reader.read_card(|| 0), Ok(Some(card)));
+        }
+    }
+
+    #[test]
+    fn changed_card_and_invalid_block_never_start_authentication() {
+        let mut bus = Bus::new();
+        let mut card = selected_card(&mut bus, &[0xde, 0xad, 0xbe, 0xef]);
+        bus.frame(&[0x50, 0, 0x57, 0xcd], &[]);
+        let mut reader = reader(bus);
+        assert_eq!(
+            reader.read_classic_block(&card, 64, KeyType::A, &[0xff; 6], || 0),
+            Err(Error::InvalidBlock)
+        );
+        card.uid.bytes[0] ^= 1;
+        assert_eq!(
+            reader.read_classic_block(&card, 1, KeyType::A, &[0xff; 6], || 0),
+            Err(Error::CardChanged)
+        );
+        assert!(reader.interface.replies.is_empty());
+        card.sak = 0x20;
+        assert_eq!(
+            reader.read_classic_block(&card, 1, KeyType::A, &[0xff; 6], || 0),
+            Err(Error::UnsupportedCard)
+        );
     }
 
     #[test]

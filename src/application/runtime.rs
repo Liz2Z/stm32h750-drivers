@@ -266,7 +266,10 @@ fn draw_page(
         DemoPage::Sensors => screen.draw_with_dma(display).is_ok(),
         DemoPage::Rfid => {
             let status = presentation::reader_status(reader.state);
-            let uid = presentation::uid_text(reader.last_uid.as_ref());
+            let uid = presentation::uid_text(reader.last_card.as_ref().map(|card| &card.uid));
+            let protocol = presentation::card_protocol(reader.last_card.as_ref());
+            let memory = presentation::memory_progress(reader.memory.as_ref());
+            let access = presentation::memory_access(reader.memory.as_ref());
             draw_rfid_page(
                 display,
                 RfidPageData {
@@ -280,6 +283,13 @@ fn draw_page(
                     } else {
                         "Last UID"
                     },
+                    card_type: reader
+                        .last_card
+                        .as_ref()
+                        .map_or("Hold one card near the antenna", |card| card.kind()),
+                    protocol: protocol.as_str(),
+                    memory: memory.as_str(),
+                    access: access.as_str(),
                 },
             )
             .is_ok()

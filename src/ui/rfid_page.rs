@@ -11,11 +11,15 @@ use embedded_graphics::{
     text::{Alignment, Baseline, Text, TextStyleBuilder},
 };
 
-/// uid 为最多 29 个 ASCII 字符的十六进制文字（最长 10 字节 UID）。
+/// uid 为最多 29 个 ASCII 字符；其他行由调用方限制在 52 个 ASCII 字符以内。
 pub struct RfidPageData<'a> {
     pub status: StatusMessage<'a>,
     pub uid: &'a str,
     pub uid_caption: &'a str,
+    pub card_type: &'a str,
+    pub protocol: &'a str,
+    pub memory: &'a str,
+    pub access: &'a str,
 }
 
 /// 重画 y=20..219 的页面主体，保留顶部动画和底栏；调用方负责刷新该区域。
@@ -44,19 +48,9 @@ pub fn draw_rfid_page<D: DrawTarget<Color = Rgb565>>(
     .draw(display)?;
     Text::with_text_style(data.uid_caption, Point::new(160, 99), normal, centered).draw(display)?;
     Text::with_text_style(data.uid, Point::new(160, 120), large, centered).draw(display)?;
-    Text::with_text_style(
-        "Hold one card near the antenna",
-        Point::new(160, 170),
-        normal,
-        centered,
-    )
-    .draw(display)?;
-    Text::with_text_style(
-        "13.56 MHz / ISO14443A",
-        Point::new(160, 189),
-        normal,
-        centered,
-    )
-    .draw(display)?;
+    Text::with_text_style(data.card_type, Point::new(160, 150), normal, centered).draw(display)?;
+    Text::with_text_style(data.protocol, Point::new(160, 167), normal, centered).draw(display)?;
+    Text::with_text_style(data.memory, Point::new(160, 184), normal, centered).draw(display)?;
+    Text::with_text_style(data.access, Point::new(160, 201), normal, centered).draw(display)?;
     Ok(())
 }

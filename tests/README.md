@@ -12,8 +12,8 @@
 | 周期期限、回绕与刷新率计算 | `src/application/scheduling.rs` 的 `tests` 子模块 |
 | 底栏状态到显示标签的转换 | `src/application/presentation.rs` 的 `tests` 子模块 |
 | AHT20、BMP280 协议与失败恢复 | `src/drivers/aht20.rs`、`src/drivers/bmp280.rs` 的 `tests` 子模块 |
-| RC522 单卡帧、UID 级联、BCC/CRC、空场、碰撞、超时与总线失败 | `src/drivers/rc522.rs` 的 `tests` 子模块 |
-| 读卡重试退避、计时回绕与故障恢复 | `src/application/rfid.rs` 的 `tests` 子模块 |
+| RC522 单卡帧、UID 级联、认证、READ/NAK、CRC、换卡、超时及清理恢复 | `src/drivers/rc522.rs` 的 `tests` 子模块 |
+| 读卡退避、回绕、A/B 回退、块状态分类与故障不推进扫描 | `src/application/rfid.rs` 的 `tests` 子模块 |
 | 按键消抖、长按、上下页首尾循环、同时按键与计时回绕 | `src/application/navigation.rs` 的 `tests` 子模块 |
 | 显示驱动协议、像素打包与错误清理 | `src/drivers/display/tests.rs` |
 | 私有文字格式化 | `src/ui/sensor_format.rs` 的 `tests` 子模块 |
@@ -49,6 +49,6 @@ make check         # 格式与 ARM 固件检查
 无需关闭测试诊断、为私有函数增加 `pub`，或引入宿主机假的固件入口。
 
 CI 的 `host-tests` 作业复用 `make check-host` 和 `make test`。
-当前覆盖 32 项单元测试与 9 项集成测试；原有十组 RGB565 画面摘要保持一致。
+当前覆盖 37 项单元测试与 9 项集成测试；原有十组 RGB565 画面摘要保持一致。
 新增底栏测试验证最长 UID 提示不越过底栏，替换短提示时没有残字。
 独立 RFID 页面测试验证绘制边界、长短卡号替换和切回传感器页后像素恢复。

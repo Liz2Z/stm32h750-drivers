@@ -62,3 +62,58 @@ CFSR / HFSR=0，SPI1 / SPI2 SR=0x1002；保存 `target/hang.log` 后删除断点
 OpenOCD `dump_image` 读取 153,600 字节需要时间，仅按 socket 接收超时判断完成会提前处理半个文件，
 导致 RGB565 解码报长度错误。应等待命令完成并确认文件长度为 320×240×2 后再解码。
 本次等待写完后成功读取并检查独立 RFID 页，区域和文字没有重叠。
+
+## 6. Classic 认证后的会话清理与 Key A 掩码
+
+原因：UID 流程在 SELECT 后立即 HALT，不能直接在该接口后接 READ；认证成功时
+MFRC522 的 Crypto1 状态还会影响下一次 WUPA。控制块读出的 Key A 区域为零掩码，
+把它当作真实密钥或把认证失败当全零块，都会给出错误的检查结果。
+
+修复：在驱动内部复用未 HALT 的选卡流程，只读会话核对卡片后认证并校验 READ CRC。
+HALT 在加密仍开启时发送，之后清理 Idle、BitFraming 和 Crypto1；三项清理分别尝试，
+不能因前一步失败就跳过后续清理。错误路径保留硬件故障并要求重新初始化。
+应用每轮只尝试一个块和一个密钥槽，明确区分未读、读取成功、默认认证失败、NAK 和读取错误。
+
+验证：mock 覆盖 4/7 字节 UID 的 A/B 认证命令、最后四字节 UID、READ CRC、NAK、
+认证失败、卡片更换和认证计时回绕超时，检查清理后可再次读卡。
+实际 1K 兼容卡的 64 块全部经默认 Key A 读取，普通数据块全零，控制块 Key A 区域为掩码；
+现场 CFSR=0。没有写卡命令，无法据此推断物业权限数据格式。
+
+## 7. GDB 栈深度与不含 Python 的工具链
+
+原因：优化和内联会改变 `runtime::run` 的栈帧编号，固定 `frame 2` 可能选中时钟函数；
+当前 arm-none-eabi-gdb 没有 Python 支持，不能使用 GDB Python 查找目标栈帧。
+
+修复：使用原生 `frame apply all -q -s print reader...`，忽略没有局部变量的帧。
+完整数组导出需 `set print elements 0` 和 `set print repeats 0`，否则重复数据会被省略。
+`make rfid-read` 已实测从正在运行的主循环取得完整卡片参数与 256 项块槽位的快照，
+其中只按 `total_blocks` 解释当前卡的有效范围，退出前恢复 CPU。
+
+另一个 OpenOCD 进程占用 ST-Link 时，`make flash` 会报初始化失败。
+应通过当前调试服务的 telnet 端口发送 `shutdown` 退出，再执行烧录；普通管道会话写入 Ctrl-C
+未必会结束服务。本次关闭占用后烧录、校验、复位成功。
+
+
+## 8. 读得到 Classic 块数据，不代表制造商块可改写
+
+2026-10-11 用户要求把当前另一张卡的 UID 改为先前读取的卡号。
+先用普通固件读取并备份目标卡完整块快照，再通过现有 OpenOCD/SWD 连接暂时停机，
+使用 SPI1 的 8 位 TXDR/RXDR 和 PA4 片选执行本次检查；没有把写卡逻辑加入常规固件。
+操作前检查 SPI1 空闲、RC522 Idle、目标 UID/ATQA/SAK，以及完整块 0 与备份一致。
+只准备修改块 0 的四字节 UID 和对应 BCC，保留其他字节；没有操作其他块。
+
+实际默认 Key A 认证及块 0 读取成功，但 WRITE 0xA0 / 块 0 第一阶段收到 4 位 NAK `0x04`，
+因此没有发送 16 字节写入载荷。常见 Gen1 可改 UID 卡的 `0x40` 七位兼容入口也未应答，
+没有继续解锁或写入。射频场重新开启后再次选卡并读取块 0，UID 和完整块内容与备份一致。
+这证明本次两种访问方式均不能修改该卡，不能仅凭未响应就断言所有可改 UID 卡型都不支持。
+普通正品 Classic 的制造商块由生产测试写保护，不能从普通数据块可读写推导 UID 可改。
+
+结束时恢复 5ms RC522 定时器、Idle、BitFraming、Crypto1 和片选高电平，并恢复 CPU。
+普通固件复读为 Present、原 UID，CFSR=0。本地记录为 `target/rfid-before-uid-write.log`、
+`target/rfid-uid-inspect.json`、`target/rfid-uid-write.json` 和 `target/rfid-after-uid-write.log`。
+本次操作脚本位于忽略的 `target/rc522_uid_once.py`，绑定现场目标 UID 和完整块 0，
+不作为通用刷卡入口；源卡号和真实卡片快照均不自动提交。
+
+协议依据：NXP MIFARE Classic EV1 1K 数据手册 8.6.1（制造商块写保护）、12.3（两阶段 WRITE）；
+兼容入口参照 miguelbalboa/rfid 的 MIFARE_OpenUidBackdoor。直接调试 SPI 时必须保持 MCU 停机，
+单次字节交换和射频轮询都设上界，退出前清理寄存器并恢复 CPU，避免与固件同时访问 SPI1。

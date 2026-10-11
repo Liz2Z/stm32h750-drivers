@@ -2,7 +2,7 @@
 
 本项目运行在 STM32H750VB 上，通过共享 I2C1 采集 AHT20 温湿度与 BMP280 气压，
 使用 SPI2 驱动 ILI9341 横屏显示。普通固件每 5 秒采样，顶部动画约 60Hz，ESP8266 默认关闭。
-RC522 单卡读号演示使用独立 SPI1，每 200ms 查询。K1（PE3）上一页，
+RC522 单卡检查使用独立 SPI1，每 200ms 查询并逐块只读扫描 Classic 内存。K1（PE3）上一页，
 K2（PC5）下一页，首尾循环，RST 保持复位；接线见 [读卡演示](RC522_DEMO.md)。
 
 ## 分层与依赖
@@ -111,7 +111,8 @@ DMA FIFO 暂时饥饿与实际传输错误分开处理，细节及实板故障�
 ## 测试边界
 
 读卡协议在 `drivers/rc522.rs`，有界 SPI1 交换和复位在 `bsp/rc522.rs`，
-重试、最近成功 UID 与在场状态在 `application/rfid.rs`。应用转换后向 UI 传入
+重试、最近卡片参数、在场状态和只读内存扫描在 `application/rfid.rs`。驱动接收指定密钥，
+应用决定逐块尝试出厂密钥的 A/B 槽、保存读取结果；应用转换后向 UI 传入
 `RfidPageData`，UI 不依赖读卡业务。按键 GPIO 在 `bsp/buttons.rs`，30ms 消抖和
 页面选择在 `application/navigation.rs`。隐藏页面的设备继续运行，环境页切回时完整重画，
 避免 RFID 内容残留；两页底栏显示按键提示、采样次数和刷新率。

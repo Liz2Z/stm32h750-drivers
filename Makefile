@@ -1,4 +1,4 @@
-.PHONY: all build examples flash debug diagnose clean bin test check check-host check-bench check-features fmt bench-build bench-flash bench-read
+.PHONY: all build examples flash debug diagnose rfid-read clean bin test check check-host check-bench check-features fmt bench-build bench-flash bench-read
 
 GDB_PORT := 3333
 
@@ -44,6 +44,11 @@ debug:
 diagnose:
 	arm-none-eabi-gdb -q -batch target/thumbv7em-none-eabihf/release/stm32h750-drivers \
 		-ex 'target extended-remote :$(GDB_PORT)' -x scripts/capture-hang.gdb
+
+# 先运行 make debug；采集当前卡片参数与内存快照，结果只存本地 target/rfid-read.log。
+rfid-read:
+	arm-none-eabi-gdb -q -batch target/thumbv7em-none-eabihf/release/stm32h750-drivers \
+		-ex 'target extended-remote :$(GDB_PORT)' -x scripts/capture-rfid.gdb
 
 # Separate output keeps the normal ELF available for restoring the application.
 bench-build:

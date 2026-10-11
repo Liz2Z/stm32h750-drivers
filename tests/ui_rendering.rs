@@ -213,6 +213,10 @@ fn rfid_page_clears_previous_content_and_switching_back_restores_sensor_pixels()
         },
         uid,
         uid_caption: "Card UID",
+        card_type: "MIFARE Classic 1K compatible",
+        protocol: "ATQA: 04 00   SAK: 08",
+        memory: "Read: 64/64 blocks  Scanned: 64/64",
+        access: "Default key failed: 0 blocks",
     };
     draw_rfid_page(&mut panel, data("04 01 02 03 04 05 06 07 08 09")).unwrap();
     assert_ne!(panel.framebuffer, sensors);

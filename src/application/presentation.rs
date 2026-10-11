@@ -47,6 +47,55 @@ pub fn uid_text(uid: Option<&crate::drivers::rc522::Uid>) -> heapless::String<32
     text
 }
 
+pub fn card_protocol(card: Option<&crate::drivers::rc522::CardInfo>) -> heapless::String<48> {
+    use core::fmt::Write;
+    let mut text = heapless::String::new();
+    if let Some(card) = card {
+        let _ = write!(
+            text,
+            "ATQA: {:02X} {:02X}   SAK: {:02X}",
+            card.atqa[0], card.atqa[1], card.sak
+        );
+    } else {
+        let _ = text.push_str("13.56 MHz / ISO14443A");
+    }
+    text
+}
+
+pub fn memory_progress(memory: Option<&super::rfid::MemoryScan>) -> heapless::String<52> {
+    use core::fmt::Write;
+    let mut text = heapless::String::new();
+    match memory {
+        Some(scan) if scan.total_blocks != 0 => {
+            let _ = write!(
+                text,
+                "Read: {}/{} blocks  Scanned: {}/{}",
+                scan.readable_blocks, scan.total_blocks, scan.completed_blocks, scan.total_blocks
+            );
+        },
+        Some(_) => {
+            let _ = text.push_str("Memory inspection unavailable");
+        },
+        None => {
+            let _ = text.push_str("Place card to inspect memory");
+        },
+    }
+    text
+}
+
+pub fn memory_access(memory: Option<&super::rfid::MemoryScan>) -> heapless::String<52> {
+    use core::fmt::Write;
+    let mut text = heapless::String::new();
+    if let Some(scan) = memory.filter(|scan| scan.total_blocks != 0) {
+        let _ = write!(
+            text,
+            "Default key failed: {} blocks",
+            scan.default_key_failed_blocks
+        );
+    }
+    text
+}
+
 fn status(series: &ReadingSnapshot) -> ValueStatus {
     match series.state() {
         SampleState::Pending => ValueStatus::Waiting,

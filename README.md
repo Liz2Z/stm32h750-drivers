@@ -143,7 +143,7 @@ src/
 ├── application/
 │   ├── runtime.rs           # 采集、动画、显示恢复的调度主循环
 │   ├── navigation.rs        # 用户键消抖与演示页面选择
-│   ├── rfid.rs              # 读卡、退避重试、最近成功 UID
+│   ├── rfid.rs              # 读卡、重试、卡片参数与只读内存扫描
 │   ├── acquisition/
 │   │   ├── mod.rs           # 持有驱动、记录、计数，提供采集与只读快照
 │   │   └── record.rs        # 私有记录：校验、历史、极值和状态
