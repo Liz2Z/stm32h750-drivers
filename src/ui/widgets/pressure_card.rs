@@ -4,8 +4,8 @@
 
 #![allow(dead_code)]
 
-use super::BoundingBox;
-use crate::ui::{GrayTheme, PixelIcon, PressureSensor};
+use super::{BoundingBox, ValueRange, ValueStatus};
+use crate::ui::{sensor_format, GrayTheme, PixelIcon};
 use embedded_graphics::{
     mono_font::{ascii::FONT_10X20, MonoTextStyle},
     pixelcolor::Rgb565,
@@ -14,6 +14,14 @@ use embedded_graphics::{
     text::{Baseline, Text},
 };
 
+/// 气压卡片声明的输入：以 hPa 为单位的数值范围和提示状态。
+/// None 显示占位符；控件不接收历史或采样时间戳。
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PressureCardData {
+    pub values: Option<ValueRange>,
+    pub status: ValueStatus,
+}
+
 /// 气压显示卡片（100x200）
 #[derive(Clone, Copy)]
 pub struct PressureCard {
@@ -21,7 +29,7 @@ pub struct PressureCard {
     pub y: i32,
     pub width: u32,
     pub height: u32,
-    pub sensor: PressureSensor,
+    pub data: PressureCardData,
     pub theme: GrayTheme,
 }
 
@@ -32,7 +40,7 @@ impl PressureCard {
             y,
             width: 100,
             height: 200,
-            sensor: PressureSensor::new(),
+            data: PressureCardData::default(),
             theme: GrayTheme::new(),
         }
     }
@@ -43,9 +51,9 @@ impl PressureCard {
         self
     }
 
-    /// 更新传感器数据
-    pub fn update(&mut self, data: PressureSensor) {
-        self.sensor = data;
+    /// 更新控件输入，不执行采样或统计。
+    pub fn update(&mut self, data: PressureCardData) {
+        self.data = data;
     }
 
     /// 获取边界框
@@ -129,7 +137,7 @@ impl PressureCard {
         display.fill_solid(&self.values_bounds().into_rectangle(), self.theme.g7)?;
         let style = MonoTextStyle::new(&FONT_10X20, self.theme.g0);
         // 5. 绘制当前气压值
-        let value_str = self.sensor.pressure_str();
+        let value_str = sensor_format::pressure(self.data.values);
         let value_text = Text::with_baseline(
             &value_str,
             Point::new(
@@ -145,19 +153,19 @@ impl PressureCard {
         use core::fmt::Write;
         let high = {
             let mut s = heapless::String::<16>::new();
-            if self.sensor.history_count == 0 {
-                let _ = s.push_str("hi:--");
+            if let Some(values) = self.data.values {
+                let _ = write!(s, "hi:{:.0}", values.high);
             } else {
-                let _ = write!(s, "hi:{:.0}", self.sensor.pressure_high);
+                let _ = s.push_str("hi:--");
             }
             s
         };
         let low = {
             let mut s = heapless::String::<16>::new();
-            if self.sensor.history_count == 0 {
-                let _ = s.push_str("lo:--");
+            if let Some(values) = self.data.values {
+                let _ = write!(s, "lo:{:.0}", values.low);
             } else {
-                let _ = write!(s, "lo:{:.0}", self.sensor.pressure_low);
+                let _ = s.push_str("lo:--");
             }
             s
         };
@@ -179,7 +187,7 @@ impl PressureCard {
         low_text.draw(display)?;
 
         Text::with_baseline(
-            self.sensor.state.label(),
+            sensor_format::state_label(self.data.status),
             Point::new(self.x + 10, self.y + 170),
             style,
             Baseline::Top,

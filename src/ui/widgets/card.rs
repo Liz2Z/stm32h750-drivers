@@ -4,8 +4,8 @@
 
 #![allow(dead_code)]
 
-use super::BoundingBox;
-use crate::ui::{GrayTheme, PixelIcon, TempHumidSensor};
+use super::{BoundingBox, ValueRange, ValueStatus};
+use crate::ui::{sensor_format, GrayTheme, PixelIcon};
 use embedded_graphics::{
     mono_font::{ascii::FONT_10X20, MonoTextStyle},
     pixelcolor::Rgb565,
@@ -14,6 +14,14 @@ use embedded_graphics::{
     text::{Baseline, Text},
 };
 
+/// 温度/湿度卡片声明的输入：数值范围和提示状态。
+/// 数值分别使用摄氏度或百分比；None 显示占位符。
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TempHumidCardData {
+    pub values: Option<ValueRange>,
+    pub status: ValueStatus,
+}
+
 /// 温湿度显示卡片（100x200）
 #[derive(Clone, Copy)]
 pub struct TempHumidCard {
@@ -21,7 +29,7 @@ pub struct TempHumidCard {
     pub y: i32,
     pub width: u32,
     pub height: u32,
-    pub sensor: TempHumidSensor,
+    pub data: TempHumidCardData,
     pub theme: GrayTheme,
     pub show_temp: bool,
 }
@@ -33,7 +41,7 @@ impl TempHumidCard {
             y,
             width: 100,
             height: 200,
-            sensor: TempHumidSensor::new(),
+            data: TempHumidCardData::default(),
             theme: GrayTheme::new(),
             show_temp,
         }
@@ -45,9 +53,9 @@ impl TempHumidCard {
         self
     }
 
-    /// 更新传感器数据
-    pub fn update(&mut self, data: TempHumidSensor) {
-        self.sensor = data;
+    /// 更新控件输入，不执行采样或统计。
+    pub fn update(&mut self, data: TempHumidCardData) {
+        self.data = data;
     }
 
     /// 获取边界框
@@ -133,9 +141,9 @@ impl TempHumidCard {
         let style = MonoTextStyle::new(&FONT_10X20, self.theme.g0);
         // 5. 绘制当前数值
         let value_str = if self.show_temp {
-            self.sensor.temp_str()
+            sensor_format::temperature(self.data.values)
         } else {
-            self.sensor.humid_str()
+            sensor_format::humidity(self.data.values)
         };
         let value_text = Text::with_baseline(
             &value_str,
@@ -150,36 +158,21 @@ impl TempHumidCard {
 
         // 6. 绘制最高/最低值
         use core::fmt::Write;
-        let (high, low) = if self.sensor.history_count == 0 {
+        let (high, low) = if let Some(values) = self.data.values {
+            let mut high = heapless::String::<16>::new();
+            let mut low = heapless::String::<16>::new();
+            if self.show_temp {
+                let _ = write!(high, "hi:{:.0}C", values.high);
+                let _ = write!(low, "lo:{:.0}C", values.low);
+            } else {
+                let _ = write!(high, "hi:{}%", values.high as i32);
+                let _ = write!(low, "lo:{}%", values.low as i32);
+            }
+            (high, low)
+        } else {
             (
                 heapless::String::<16>::from("hi:--"),
                 heapless::String::<16>::from("lo:--"),
-            )
-        } else if self.show_temp {
-            (
-                {
-                    let mut s = heapless::String::<16>::new();
-                    let _ = write!(s, "hi:{:.0}C", self.sensor.temp_high);
-                    s
-                },
-                {
-                    let mut s = heapless::String::<16>::new();
-                    let _ = write!(s, "lo:{:.0}C", self.sensor.temp_low);
-                    s
-                },
-            )
-        } else {
-            (
-                {
-                    let mut s = heapless::String::<16>::new();
-                    let _ = write!(s, "hi:{}%", self.sensor.humid_high as i32);
-                    s
-                },
-                {
-                    let mut s = heapless::String::<16>::new();
-                    let _ = write!(s, "lo:{}%", self.sensor.humid_low as i32);
-                    s
-                },
             )
         };
 
@@ -200,7 +193,7 @@ impl TempHumidCard {
         low_text.draw(display)?;
 
         Text::with_baseline(
-            self.sensor.state.label(),
+            sensor_format::state_label(self.data.status),
             Point::new(self.x + 10, self.y + 170),
             style,
             Baseline::Top,

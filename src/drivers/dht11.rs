@@ -304,7 +304,7 @@ where
 fn delay_ms(ms: u32) {
     for _ in 0..ms {
         for _ in 0..8000 {
-            cortex_m::asm::nop();
+            core::hint::spin_loop();
         }
     }
 }
@@ -319,7 +319,7 @@ fn delay_ms(ms: u32) {
 fn delay_us(us: u32) {
     for _ in 0..us {
         for _ in 0..8 {
-            cortex_m::asm::nop();
+            core::hint::spin_loop();
         }
     }
 }

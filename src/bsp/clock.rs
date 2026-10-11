@@ -22,3 +22,12 @@ impl Clock {
         }
     }
 }
+
+/// 软件延时函数
+///
+/// 用于现有的系统启动和 ESP8266 阻塞流程。
+/// STM32H750 主频 400MHz，1ms = 400,000 个 CPU 周期
+/// 启动与 ESP 代码沿用周期延时；传感器和调度使用 TIM2。
+pub fn delay_ms(ms: u32) {
+    cortex_m::asm::delay(ms * 400_000);
+}

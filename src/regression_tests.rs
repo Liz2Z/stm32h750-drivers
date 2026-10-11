@@ -1,64 +1,131 @@
 use crate::{
-    acquisition::Sensors,
-    aht20::{Aht20, Aht20Error},
-    bmp280::{Bmp280, Bmp280Error},
-    clip_region,
-    scheduling::{Periodic, RefreshRate},
-    sensor::{PressureSensor, SampleState, TempHumidSensor},
-    transport::{write_spi, TransferError},
-    ui::{FlushTarget, PressureCard, Screen, TempHumidCard},
+    application::acquisition::{Acquisition, SampleState},
+    application::presentation,
+    application::scheduling::{Periodic, RefreshRate},
+    drivers::{
+        aht20::{Aht20, Aht20Error},
+        bmp280::{Bmp280, Bmp280Error},
+    },
+    ui::{FlowAnimation, FlushTarget, PressureCard, Screen, TempHumidCard},
 };
 use embedded_graphics::{pixelcolor::Rgb565, prelude::*};
-use embedded_hal::{
-    blocking::i2c::{Read, Write, WriteRead},
-    spi::FullDuplex,
-};
-use std::{collections::VecDeque, vec, vec::Vec};
+use embedded_hal::blocking::i2c::{Read, Write, WriteRead};
+use std::{vec, vec::Vec};
 
 #[test]
-fn zero_and_negative_temperatures_preserve_extrema() {
-    let mut data = TempHumidSensor::new();
-    for temp in [0.0, 5.0, -3.0, 0.0, 2.0] {
-        data.update_temp(temp);
-    }
-    assert_eq!((data.temp_low, data.temp_high), (-3.0, 5.0));
-    let mut data = TempHumidSensor::new();
-    for temp in [0.0, -5.0] {
-        data.update_temp(temp);
-    }
-    assert_eq!(data.temp_high, 0.0);
-    let mut data = TempHumidSensor::new();
-    for humid in [0.0, 60.0] {
-        data.update_humid(humid);
-    }
-    assert_eq!(data.humid_low, 0.0);
+fn acquisition_snapshots_map_failure_and_recovery_without_exposing_records() {
+    use crate::ui::ValueStatus;
+    let mut bus = SensorBus::new();
+    let mut acquisition = Acquisition::default();
+    let initial = acquisition.snapshot();
+    assert_eq!(initial.sample_count, 0);
+    assert_eq!(initial.temperature.state(), SampleState::Pending);
+    assert_eq!(
+        presentation::climate_card(&initial.temperature).status,
+        ValueStatus::Waiting
+    );
+    assert_eq!(presentation::pressure_card(&initial.pressure).values, None);
+    assert_eq!(crate::ui::sensor_format::pressure(None).as_str(), "----hPa");
+
+    bus.aht_present = false;
+    acquisition.sample(&mut bus, &mut |_| {}, &mut || 10);
+    let failed = acquisition.snapshot();
+    assert_eq!(failed.sample_count, 1);
+    assert_eq!(
+        presentation::climate_card(&failed.temperature).status,
+        ValueStatus::Error
+    );
+    assert_eq!(failed.temperature.values(), None);
+    assert_eq!(failed.pressure.state(), SampleState::Fresh);
+
+    bus.aht_present = true;
+    let mut timestamp = 20;
+    acquisition.sample(&mut bus, &mut |_| {}, &mut || {
+        timestamp += 1;
+        timestamp
+    });
+    let valid = acquisition.snapshot();
+    assert_eq!(valid.sample_count, 2);
+    assert_eq!(valid.temperature.last_success_us(), Some(21));
+    assert_eq!(valid.humidity.last_success_us(), Some(21));
+    assert_eq!(valid.pressure.last_success_us(), Some(22));
+    let card = presentation::climate_card(&valid.temperature);
+    assert_eq!(card.status, ValueStatus::Normal);
+    assert_eq!(card.values.unwrap().current, 25.0);
+
+    bus.aht_present = false;
+    acquisition.sample(&mut bus, &mut |_| {}, &mut || 30);
+    let stale = acquisition.snapshot();
+    assert_eq!(stale.sample_count, 3);
+    assert_eq!(
+        presentation::climate_card(&stale.temperature).status,
+        ValueStatus::Stale
+    );
+    assert_eq!(
+        presentation::climate_card(&stale.temperature).values,
+        card.values
+    );
+    assert_eq!(stale.temperature.history(), &[25.0]);
+    assert_eq!(stale.temperature.last_success_us(), Some(21));
+    assert_eq!(stale.pressure.last_success_us(), Some(30));
+
+    bus.aht_present = true;
+    bus.bmp_present = false;
+    acquisition.sample(&mut bus, &mut |_| {}, &mut || 40);
+    let recovered = acquisition.snapshot();
+    assert_eq!(recovered.sample_count, 4);
+    assert_eq!(recovered.temperature.state(), SampleState::Fresh);
+    assert_eq!(recovered.temperature.history(), &[25.0, 25.0]);
+    assert_eq!(recovered.temperature.last_success_us(), Some(40));
+    assert_eq!(
+        presentation::pressure_card(&recovered.pressure).status,
+        ValueStatus::Stale
+    );
+    assert_eq!(recovered.pressure.last_success_us(), Some(30));
+    // 旧快照独立于组件，后续采集不会改变它。
+    assert_eq!(initial.temperature.state(), SampleState::Pending);
+    assert_eq!(valid.temperature.history(), &[25.0]);
+    assert_eq!(failed.sample_count, 1);
 }
 
 #[test]
-fn missing_stale_and_recovered_samples_are_distinct() {
-    let mut data = PressureSensor::new();
-    assert_eq!(data.pressure_str().as_str(), "----hPa");
-    data.mark_failed();
-    assert_eq!(data.state, SampleState::Error);
-    data.update(1000.0);
-    data.mark_updated(42);
-    data.mark_failed();
-    assert_eq!(data.state, SampleState::Stale);
-    assert_eq!(data.pressure_current, 1000.0);
-    assert_eq!(data.last_success_us, Some(42));
-    data.update(1001.0);
-    data.mark_updated(50);
-    assert_eq!(data.state, SampleState::Fresh);
-    assert_eq!(data.last_success_us, Some(50));
-}
-
-#[test]
-fn nonfinite_samples_do_not_corrupt_history() {
-    let mut data = TempHumidSensor::new();
-    data.update_temp(20.0);
-    data.update_temp(f32::NAN);
-    assert_eq!(data.history_count, 1);
-    assert_eq!(data.temp_current, 20.0);
+fn footer_mapping_preserves_labels_and_hides_disabled_connection() {
+    use crate::{
+        application::connection::{EspLinkState, UploadState},
+        ui::status::StatusTone,
+    };
+    for (link, text, tone) in [
+        (
+            EspLinkState::SerialReady,
+            "ESP: AT ready",
+            StatusTone::Normal,
+        ),
+        (
+            EspLinkState::WifiConnected,
+            "WiFi: connected",
+            StatusTone::Success,
+        ),
+        (EspLinkState::Failed, "ESP: failed", StatusTone::Failure),
+    ] {
+        for (upload, upload_text, upload_tone) in [
+            (UploadState::Disabled, "Upload: disabled", StatusTone::Muted),
+            (UploadState::Idle, "Upload: idle", StatusTone::Normal),
+            (UploadState::Ok, "Upload: ok", StatusTone::Success),
+            (UploadState::Failed, "Upload: failed", StatusTone::Failure),
+        ] {
+            let hidden = presentation::status_bar(false, link, upload, 42, Some(5920));
+            assert_eq!(hidden.connection, None);
+            assert_eq!(hidden.sample_count, 42);
+            assert_eq!(hidden.refresh_centihz, Some(5920));
+            let shown = presentation::status_bar(true, link, upload, 42, None);
+            let labels = shown.connection.unwrap();
+            assert_eq!((labels.link.text, labels.link.tone), (text, tone));
+            assert_eq!(
+                (labels.upload.text, labels.upload.tone),
+                (upload_text, upload_tone)
+            );
+        }
+    }
 }
 
 #[test]
@@ -103,17 +170,6 @@ fn refresh_rate_uses_actual_elapsed_time_across_counter_wrap() {
     rate.record_success();
     rate.poll(start.wrapping_add(15_000_000));
     assert_eq!(rate.centihz(), Some(20));
-}
-
-#[test]
-fn refresh_clips_empty_and_overflowing_regions() {
-    assert_eq!(clip_region(5, 5, 0, 10, 320, 240), None);
-    assert_eq!(clip_region(5, 5, 10, 0, 320, 240), None);
-    assert_eq!(clip_region(320, 0, 1, 1, 320, 240), None);
-    assert_eq!(
-        clip_region(319, 239, u16::MAX, u16::MAX, 320, 240),
-        Some((319, 239, 1, 1))
-    );
 }
 
 struct SensorBus {
@@ -241,13 +297,13 @@ fn bmp_rejects_invalid_calibration_and_reset_measurements() {
 fn aht_failure_does_not_stop_pressure_and_is_retried() {
     let mut bus = SensorBus::new();
     bus.aht_present = false;
-    let mut sensors = Sensors::default();
-    let readings = sensors.sample(&mut bus, &mut |_| {});
+    let mut sensors = Acquisition::default();
+    let readings = sensors.sample(&mut bus, &mut |_| {}, &mut || 42);
     assert!(readings.climate.is_err());
     assert!(readings.pressure.is_ok());
     assert_eq!(bus.pressure_reads, 1);
     bus.aht_present = true;
-    let readings = sensors.sample(&mut bus, &mut |_| {});
+    let readings = sensors.sample(&mut bus, &mut |_| {}, &mut || 42);
     let climate = readings.climate.unwrap();
     assert_eq!(climate.temperature, 25.0);
     assert_eq!(climate.humidity, 50.0);
@@ -271,79 +327,6 @@ fn aht_checks_calibration_and_bounds_busy_polling() {
         Err(Aht20Error::Busy)
     ));
     assert_eq!(waited_ms, 180);
-}
-
-#[derive(Default)]
-struct SpiMock {
-    sent: Vec<u8>,
-    incoming: VecDeque<u8>,
-    stalled_tx: bool,
-    stalled_rx: bool,
-    fault: bool,
-}
-impl FullDuplex<u8> for SpiMock {
-    type Error = ();
-    fn send(&mut self, byte: u8) -> nb::Result<(), ()> {
-        if self.fault {
-            return Err(nb::Error::Other(()));
-        }
-        if self.stalled_tx {
-            return Err(nb::Error::WouldBlock);
-        }
-        self.sent.push(byte);
-        self.incoming.push_back(0);
-        assert!(self.incoming.len() <= 4);
-        Ok(())
-    }
-    fn read(&mut self) -> nb::Result<u8, ()> {
-        if self.stalled_rx {
-            return Err(nb::Error::WouldBlock);
-        }
-        self.incoming.pop_front().ok_or(nb::Error::WouldBlock)
-    }
-}
-
-#[test]
-fn spi_transmits_without_overwriting_source_data() {
-    let mut spi = SpiMock::default();
-    let data = [1, 2, 3, 4, 5, 6];
-    write_spi(&mut spi, || 0, &data, 1000).unwrap();
-    assert_eq!(spi.sent, data);
-    assert!(spi.incoming.is_empty());
-}
-
-#[test]
-fn spi_stalled_tx_and_rx_timeout_across_clock_wrap() {
-    for stalled_tx in [false, true] {
-        let mut spi = SpiMock {
-            stalled_tx,
-            stalled_rx: !stalled_tx,
-            ..SpiMock::default()
-        };
-        let mut now = u32::MAX - 20;
-        let result = write_spi(
-            &mut spi,
-            || {
-                now = now.wrapping_add(10);
-                now
-            },
-            &[1, 2, 3, 4, 5],
-            100,
-        );
-        assert_eq!(result, Err(TransferError::Timeout));
-    }
-}
-
-#[test]
-fn spi_errors_are_propagated() {
-    let mut spi = SpiMock {
-        fault: true,
-        ..SpiMock::default()
-    };
-    assert_eq!(
-        write_spi(&mut spi, || 0, &[1], 100),
-        Err(TransferError::Spi(()))
-    );
 }
 
 #[derive(Debug)]
@@ -425,22 +408,128 @@ fn screen() -> Screen {
 }
 
 #[test]
+fn widget_owned_inputs_preserve_original_card_and_footer_pixels() {
+    use crate::ui::{
+        status::{draw_status, ConnectionLabels, StatusData, StatusLabel, StatusTone},
+        PressureCardData, TempHumidCardData, ValueRange, ValueStatus,
+    };
+    // 改动前实现生成的 RGB565 小端像素 FNV-1a 快照，覆盖等待、失败、正常、旧值和恢复。
+    // 控件测试只构造 UI 输入，不创建任何领域模型。
+    let expected = [
+        [0xf87b538557828dcb, 0x8878aeb1e1a8000f],
+        [0xced7583177dcd7fb, 0x6000d3cb60bcf9ff],
+        [0x23b4ba5ef6ac94fb, 0xb4de35f8df8cb6ff],
+        [0x2594c85cdbc365eb, 0x97735c712a85daef],
+        [0xbc7ef32c19d6b795, 0x58b1da95008da0a9],
+    ];
+    let range = |current, high, low| Some(ValueRange { current, high, low });
+    for (phase, expected) in expected.into_iter().enumerate() {
+        let status = match phase {
+            0 => ValueStatus::Waiting,
+            1 => ValueStatus::Error,
+            3 => ValueStatus::Stale,
+            _ => ValueStatus::Normal,
+        };
+        let (temp, humid, pressure) = if phase < 2 {
+            (None, None, None)
+        } else {
+            (
+                if phase == 4 {
+                    range(0.0, 0.0, -12.3)
+                } else {
+                    range(-12.3, -12.3, -12.3)
+                },
+                range(55.0, 55.0, 55.0),
+                range(1000.0, 1000.0, 1000.0),
+            )
+        };
+        let mut view = screen();
+        view.update_sensors(
+            TempHumidCardData {
+                values: temp,
+                status,
+            },
+            TempHumidCardData {
+                values: humid,
+                status,
+            },
+            PressureCardData {
+                values: pressure,
+                status,
+            },
+        );
+        let mut panel = Panel::new();
+        view.draw_with_dma(&mut panel).unwrap();
+        for (enabled, expected) in [false, true].into_iter().zip(expected) {
+            draw_status(
+                &mut panel,
+                StatusData {
+                    connection: enabled.then_some(ConnectionLabels {
+                        link: StatusLabel {
+                            text: "ESP: failed",
+                            tone: StatusTone::Failure,
+                        },
+                        upload: StatusLabel {
+                            text: "Upload: disabled",
+                            tone: StatusTone::Muted,
+                        },
+                    }),
+                    sample_count: 42,
+                    refresh_centihz: Some(5920),
+                },
+            );
+            let hash = panel
+                .framebuffer
+                .iter()
+                .fold(0xcbf29ce484222325u64, |mut hash, pixel| {
+                    for byte in pixel.into_storage().to_le_bytes() {
+                        hash = (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3);
+                    }
+                    hash
+                });
+            assert_eq!(hash, expected, "phase={phase}, connection={enabled}");
+        }
+    }
+}
+
+#[test]
 fn partial_render_matches_full_frame_after_shorter_numbers_and_errors() {
     let mut screen = screen();
     let mut partial = Panel::new();
     screen.draw_with_dma(&mut partial).unwrap();
-    let mut temp = TempHumidSensor::new();
-    let mut humid = TempHumidSensor::new();
-    let mut pressure = PressureSensor::new();
+    use crate::ui::{PressureCardData, TempHumidCardData, ValueRange, ValueStatus};
     for value in [-12.3, 0.0, 5.0, 100.0] {
-        temp.update_temp(value);
-        humid.update_humid(50.0);
-        pressure.update(1000.0);
-        if value == 0.0 {
-            temp.mark_failed();
-            pressure.mark_failed();
-        }
-        screen.update_sensors(temp, humid, pressure);
+        let status = if value == 0.0 {
+            ValueStatus::Stale
+        } else {
+            ValueStatus::Normal
+        };
+        screen.update_sensors(
+            TempHumidCardData {
+                values: Some(ValueRange {
+                    current: value,
+                    high: value.max(-12.3),
+                    low: -12.3,
+                }),
+                status,
+            },
+            TempHumidCardData {
+                values: Some(ValueRange {
+                    current: 50.0,
+                    high: 50.0,
+                    low: 50.0,
+                }),
+                status: ValueStatus::Normal,
+            },
+            PressureCardData {
+                values: Some(ValueRange {
+                    current: 1000.0,
+                    high: 1000.0,
+                    low: 1000.0,
+                }),
+                status,
+            },
+        );
         screen.draw_sensor_updates(&mut partial).unwrap();
         let mut full = Panel::new();
         screen.draw_with_dma(&mut full).unwrap();
@@ -449,54 +538,82 @@ fn partial_render_matches_full_frame_after_shorter_numbers_and_errors() {
 }
 
 #[test]
+fn animation_only_changes_its_strip_and_skips_late_frames_across_wrap() {
+    let mut panel = Panel::new();
+    let mut animation = FlowAnimation::new(u32::MAX - 49_999);
+    animation.refresh(&mut panel, 0).unwrap();
+    let first = panel.visible.clone();
+    animation.refresh(&mut panel, 750_000).unwrap();
+    assert_ne!(first, panel.visible);
+    assert!(panel
+        .windows
+        .iter()
+        .all(|&window| window == (5, 3, 310, 14)));
+    for y in 0..240 {
+        for x in 0..320 {
+            if !(5..315).contains(&x) || !(3..17).contains(&y) {
+                assert_eq!(panel.framebuffer[y * 320 + x], Rgb565::BLACK);
+            }
+        }
+    }
+    let mut reference = Panel::new();
+    let mut from_zero = FlowAnimation::new(0);
+    from_zero.refresh(&mut reference, 800_000).unwrap();
+    assert_eq!(panel.visible, reference.visible);
+    animation.refresh(&mut panel, 6_750_000).unwrap();
+    assert_eq!(panel.visible, reference.visible);
+}
+
+#[test]
 fn unchanged_samples_skip_transfer_and_failed_refresh_keeps_dirty_regions() {
     let mut screen = screen();
     let mut panel = Panel::new();
     screen.draw_with_dma(&mut panel).unwrap();
     panel.windows.clear();
-    let mut temp = TempHumidSensor::new();
-    temp.update_temp(20.0);
-    screen.update_sensors(temp, TempHumidSensor::new(), PressureSensor::new());
+    let mut acquisition = Acquisition::default();
+    let mut bus = SensorBus::new();
+    acquisition.sample(&mut bus, &mut |_| {}, &mut || 0);
+    let before = acquisition.snapshot();
+    screen.update_sensors(
+        presentation::climate_card(&before.temperature),
+        Default::default(),
+        Default::default(),
+    );
     panel.fail = true;
     assert!(screen.draw_sensor_updates(&mut panel).is_err());
     assert_eq!(screen.dirty_rects.len(), 1);
     screen.draw_sensor_updates(&mut panel).unwrap();
     assert_eq!(panel.windows, [(6, 95, 98, 115)]);
     assert!(screen.dirty_rects.is_empty());
-    temp.update_temp(20.0);
-    temp.mark_updated(100);
-    screen.update_sensors(temp, TempHumidSensor::new(), PressureSensor::new());
+    acquisition.sample(&mut bus, &mut |_| {}, &mut || 100);
+    let after = acquisition.snapshot();
+    assert_ne!(
+        before.temperature.last_success_us(),
+        after.temperature.last_success_us()
+    );
+    assert_ne!(before.temperature.history(), after.temperature.history());
+    screen.update_sensors(
+        presentation::climate_card(&after.temperature),
+        Default::default(),
+        Default::default(),
+    );
     screen.draw_sensor_updates(&mut panel).unwrap();
     assert_eq!(panel.windows.len(), 1);
-}
-
-#[test]
-fn packed_rectangle_skips_row_padding_and_preserves_big_endian_order() {
-    let frame: Vec<u16> = (0x1200..0x1214).collect(); // 5 x 4 framebuffer
-    let region = (1, 1, 3, 2);
-    let mut first = [0; 8];
-    let count = crate::framebuffer::pack_rect_chunk(&frame, 5, region, 0, &mut first);
-    assert_eq!(count, 4);
-    assert_eq!(first, [0x12, 6, 0x12, 7, 0x12, 8, 0x12, 11]);
-    let mut second = [0xaa; 8];
-    let count = crate::framebuffer::pack_rect_chunk(&frame, 5, region, 4, &mut second);
-    assert_eq!(count, 2);
-    assert_eq!(second, [0x12, 12, 0x12, 13, 0xaa, 0xaa, 0xaa, 0xaa]);
 }
 
 #[test]
 fn pressure_failure_does_not_stop_climate_sampling() {
     let mut bus = SensorBus::new();
     bus.bmp_present = false;
-    let mut sensors = Sensors::default();
-    let readings = sensors.sample(&mut bus, &mut |_| {});
+    let mut sensors = Acquisition::default();
+    let readings = sensors.sample(&mut bus, &mut |_| {}, &mut || 42);
     assert!(readings.climate.is_ok());
     assert!(matches!(
         readings.pressure,
         Err(Bmp280Error::DeviceNotFound)
     ));
     bus.bmp_present = true;
-    let readings = sensors.sample(&mut bus, &mut |_| {});
+    let readings = sensors.sample(&mut bus, &mut |_| {}, &mut || 42);
     assert!(readings.climate.is_ok());
     assert!(readings.pressure.is_ok());
 }

@@ -5,6 +5,7 @@
 #![allow(dead_code)]
 
 use super::{BoundingBox, GrayTheme, ProgressBar, Widget};
+use super::{PressureCardData, TempHumidCardData};
 use embedded_graphics::{pixelcolor::Rgb565, prelude::*};
 
 /// A draw target whose framebuffer can be sent to a physical display.
@@ -249,28 +250,18 @@ impl Screen {
         }
         Ok(())
     }
-    /// Update persistent cards and mark only their dynamic interior regions.
+    /// 接收卡片输入，仅在显示数据变化时标记动态区域。
     pub fn update_sensors(
         &mut self,
-        temp: super::TempHumidSensor,
-        humid: super::TempHumidSensor,
-        pressure: super::PressureSensor,
+        temp: TempHumidCardData,
+        humid: TempHumidCardData,
+        pressure: PressureCardData,
     ) {
         for widget in &mut self.widgets {
             let dirty = match widget {
                 Widget::TempHumidCard(card) => {
                     let next = if card.show_temp { temp } else { humid };
-                    let prev = card.sensor;
-                    let changed = prev.state != next.state
-                        || if card.show_temp {
-                            prev.temp_current != next.temp_current
-                                || prev.temp_high != next.temp_high
-                                || prev.temp_low != next.temp_low
-                        } else {
-                            prev.humid_current != next.humid_current
-                                || prev.humid_high != next.humid_high
-                                || prev.humid_low != next.humid_low
-                        };
+                    let changed = card.data != next;
                     card.update(next);
                     if changed {
                         Some(card.values_bounds())
@@ -279,11 +270,7 @@ impl Screen {
                     }
                 },
                 Widget::PressureCard(card) => {
-                    let prev = card.sensor;
-                    let changed = prev.state != pressure.state
-                        || prev.pressure_current != pressure.pressure_current
-                        || prev.pressure_high != pressure.pressure_high
-                        || prev.pressure_low != pressure.pressure_low;
+                    let changed = card.data != pressure;
                     card.update(pressure);
                     if changed {
                         Some(card.values_bounds())
@@ -326,5 +313,17 @@ impl Screen {
         }
         self.clear_dirty();
         Ok(())
+    }
+}
+
+impl<T: crate::drivers::display::DisplayInterface> FlushTarget
+    for crate::drivers::display::DisplayDriver<T>
+{
+    type FlushError = T::Error;
+    fn flush(&mut self) -> Result<(), Self::FlushError> {
+        crate::drivers::display::DisplayDriver::flush(self)
+    }
+    fn flush_rect(&mut self, x: u16, y: u16, w: u16, h: u16) -> Result<(), Self::FlushError> {
+        crate::drivers::display::DisplayDriver::flush_rect(self, x, y, w, h)
     }
 }

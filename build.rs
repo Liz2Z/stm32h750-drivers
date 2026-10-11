@@ -12,6 +12,9 @@ fn main() {
         lv_config_path.display()
     );
 
+    println!("cargo:rustc-link-search={}", manifest_dir);
+    println!("cargo:rerun-if-changed=memory.x");
+
     // 重新运行条件
     println!("cargo:rerun-if-changed=lvgl-config/lv_conf.h");
     println!("cargo:rerun-if-changed=build.rs");

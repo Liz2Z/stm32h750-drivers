@@ -2,7 +2,7 @@
 target = "thumbv7em-none-eabihf"
 
 [target.thumbv7em-none-eabihf]
-runner = "st-flash --connect-under-reset"
+# Flash/debug through make flash/make debug (OpenOCD/GDB).
 rustflags = [
   "-C", "link-arg=-Tlink.x",
 ]

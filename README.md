@@ -24,7 +24,7 @@
 | 屏幕驱动 | ILI9341 |
 | 分辨率 | 240x320 (横屏 320x240) |
 | 颜色深度 | 16位 RGB565 |
-| SPI 时钟 | 80 MHz |
+| SPI 时钟 | 实际 50 MHz（请求 80 MHz，400 MHz 内核时钟 / 8）|
 
 ## 硬件连接
 
@@ -134,23 +134,45 @@ arm-none-eabi-gdb target/thumbv7em-none-eabihf/release/stm32h750-drivers
 
 ```
 src/
-├── main.rs              # 主程序入口
-├── profiler.rs          # 性能检测模块（可选）
+├── main.rs                  # 仅装配板级资源并启动应用
+├── lib.rs                   # 固件、示例与测试共用的模块入口
+├── application/
+│   ├── runtime.rs           # 采集、动画、显示恢复的调度主循环
+│   ├── acquisition/
+│   │   ├── mod.rs           # 持有驱动、记录、计数，提供采集与只读快照
+│   │   └── record.rs        # 私有记录：校验、历史、极值和状态
+│   ├── presentation.rs      # 采样/连接状态转为控件输入
+│   ├── connection.rs        # 连接与上传流程状态
+│   ├── scheduling.rs        # 周期期限和成功刷新率
+│   └── config.rs            # 应用配置，ESP 默认关闭
 ├── drivers/
-│   ├── aht20.rs         # AHT20 温湿度传感器
-│   ├── bmp280.rs        # BMP280 气压传感器
-│   ├── display.rs       # ILI9341 屏幕驱动
-│   ├── dht11.rs         # DHT11 预留驱动
-│   ├── adc_ntc.rs       # NTC 预留驱动
-│   └── serial.rs        # 串口通信
-└── ui/
-    ├── screen.rs        # 屏幕容器
-    ├── widgets/         # UI 控件
-    │   ├── card.rs      # 温湿度卡片
-    │   ├── pressure_card.rs # 气压卡片
-    │   ├── label.rs     # 标签
-    │   └── ...          # 其他预留控件
-    └── theme.rs         # 主题配置
+│   ├── aht20.rs / bmp280.rs # 基于 embedded-hal 的传感器协议
+│   └── display/
+│       ├── mod.rs           # DisplayInterface 传输接口
+│       ├── ili9341.rs       # 控制器协议、绘图和区域刷新
+│       ├── pixel_pack.rs    # 裁剪、原生 u16 像素打包
+│       ├── spi_transfer.rs  # 有超时的 8 位命令发送
+│       ├── error.rs         # 显式传输错误
+│       └── tests.rs         # 模拟传输接口的宿主机测试
+├── bsp/
+│   ├── board.rs             # STM32H750 时钟、引脚与外设所有权
+│   ├── clock.rs             # TIM2 微秒时钟
+│   ├── bounded_i2c.rs       # I2C 事务期限和恢复
+│   ├── adc_ntc.rs           # 预留 ADC 驱动
+│   ├── profiler.rs          # 可选 DWT 计时
+│   └── display/
+│       ├── spi2.rs          # SPI2、CS/DC 和字长切换
+│       ├── dma.rs           # DMA1 像素发送、超时和停流
+│       ├── framebuffer.rs   # AXI SRAM 缓冲存储与一次性领取
+│       └── bench.rs         # display-bench 特性下的实板测速
+├── ui/
+│   ├── screen.rs            # 控件布局、脏区域和显示适配
+│   ├── sensor_format.rs     # 单位、占位符、状态文字
+│   ├── status.rs            # 底栏状态与刷新率
+│   ├── flow_animation.rs    # 顶部动画
+│   ├── theme.rs             # 原配色
+│   └── widgets/             # 卡片等控件；各自定义输入类型
+└── regression_tests.rs      # 采样、采集和 UI 集成回归测试
 ```
 
 ## 技术实现
@@ -160,8 +182,10 @@ src/
 使用帧缓冲实现高效显示：
 
 1. **内存布局**：240×320×2 字节 ≈ 150KB (AXISRAM)
-2. **绘图流程**：在内存中绘制 → 有超时的阻塞式 SPI 分块传输 → 屏幕显示
+2. **绘图流程**：在内存中绘制 → SPI2 16 位 DMA 传输 → 等待线路发送完毕（有超时）→ 屏幕显示。整行区域直接读取帧缓冲，窄区域使用 8KB 原生像素缓冲
 3. **局部刷新**：仅重绘变化的卡片数字与状态，静态图标和边框保留；三张卡片同时更新的像素数据约减少 56%
+4. **顶部动画**：流光往返移动，以 16.667ms 期限刷新 310×14 区域；底栏刷新率计入成功的动画更新，采样仍为 5 秒一次
+5. **缓存与资源**：开启 I-Cache，保持 D-Cache 关闭；显示独占 DMA1，使用 stream 0 / DMAMUX request 40。后续开启 D-Cache 或共享 DMA1 前必须调整驱动
 
 ### 传感器轮询
 
@@ -171,11 +195,23 @@ src/
 - I2C 事务和 SPI 传输具有超时，错误会返回应用层
 - `make test` 运行主机回归测试，`make check` 检查格式和 Clippy
 
+### 实板显示测速
+
+`make bench-flash` 构建并烧录一次性测速固件，启动后测试绘图、整屏、三张卡片和顶部区域的传输，
+结束后继续进入正常界面。测速期间不要打断点。另一个终端运行 `make debug`，完成后执行
+`make bench-read` 读取 `status=2` 的结果；关闭 OpenOCD 后用 `make flash` 恢复普通固件。
+结果中的时间单位为微秒，平均耗时为 `total_us / successes`，帧率为
+`successes × 1,000,000 / total_us`。这是当前实现的吞吐基线，不是芯片极限或面板扫描频率。
+
 ## 开发文档
 
 ### 架构文档
 
 - [架构设计](docs/ARCHITECTURE.md) - 系统整体架构
+- [BSP 模块说明](src/bsp/README.md) - 板级硬件、接线、时钟与 DMA 的职责
+- [Drivers 模块说明](src/drivers/README.md) - 器件协议、传输接口与驱动复用边界
+- [Application 模块说明](src/application/README.md) - 采集所有权、流程调度与展示适配
+- [UI 模块说明](src/ui/README.md) - 控件输入、绘制和刷新边界
 - [帧缓冲指南](docs/learning/FRAME_BUFFER_GUIDE.md) - 帧缓冲实现原理
 - [硬件连接](docs/learning/HARDWARE_CONNECTION.md) - 详细硬件连接说明
 
@@ -190,7 +226,8 @@ src/
 
 ## 性能优化
 
-- 局部更新卡片数字和状态，减少 SPI 数据量；当前未启用硬件 DMA
+- 局部更新卡片数字和状态，减少 SPI 数据量；像素通过 DMA1 发送
+- 实板 50MHz SPI：整屏传输由 129.09ms 降至 24.58ms（约 5.25 倍），详见[测速与踩坑记录](docs/troubleshootings/DISPLAY_AND_SENSOR_RELIABILITY.md#14-dma-像素传输与实板恢复验证2026-10-11)
 - 帧缓冲避免频繁 SPI 通信
 - 优化传感器读取间隔
 

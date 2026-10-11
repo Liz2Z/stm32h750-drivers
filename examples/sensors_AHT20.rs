@@ -24,11 +24,7 @@ use cortex_m_rt::entry;
 use panic_halt as _;
 use stm32h7xx_hal::{pac, prelude::*};
 
-// 从 src 目录引用模块
-#[path = "../src/drivers/aht20.rs"]
-mod aht20;
-
-use aht20::Aht20;
+use stm32h750_drivers::drivers::{Aht20, Aht20Error};
 
 /// 精确延时函数
 ///
@@ -88,16 +84,16 @@ fn main() -> ! {
         Err(e) => {
             // 初始化失败，根据错误类型处理
             match e {
-                aht20::Aht20Error::I2cError => {
+                Aht20Error::I2cError => {
                     // I2C 通信错误，检查硬件连接和上拉电阻
                 },
-                aht20::Aht20Error::NotCalibrated => {
+                Aht20Error::NotCalibrated => {
                     // 传感器未校准
                 },
-                aht20::Aht20Error::Busy => {
+                Aht20Error::Busy => {
                     // 传感器忙
                 },
-                aht20::Aht20Error::InvalidData => {
+                Aht20Error::InvalidData => {
                     // 无效数据
                 },
             }
@@ -133,16 +129,16 @@ fn main() -> ! {
             Err(e) => {
                 // 读取失败，根据错误类型处理
                 match e {
-                    aht20::Aht20Error::I2cError => {
+                    Aht20Error::I2cError => {
                         // I2C 通信错误
                     },
-                    aht20::Aht20Error::NotCalibrated => {
+                    Aht20Error::NotCalibrated => {
                         // 传感器未校准
                     },
-                    aht20::Aht20Error::Busy => {
+                    Aht20Error::Busy => {
                         // 传感器忙，可能延时不够
                     },
-                    aht20::Aht20Error::InvalidData => {
+                    Aht20Error::InvalidData => {
                         // 无效数据，可能是传感器故障
                     },
                 }

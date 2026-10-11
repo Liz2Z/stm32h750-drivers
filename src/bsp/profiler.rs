@@ -125,7 +125,7 @@ where
 
     /// 结束计时并输出结果
     #[cfg(feature = "profiler")]
-    pub fn finish(mut self) -> u32 {
+    pub fn finish(self) -> u32 {
         let end = DWT::cycle_count();
         let cycles = end.wrapping_sub(self.start);
         let time_us = cycles / 400;

@@ -8,13 +8,15 @@ mod history;
 mod label;
 mod pressure_card;
 mod progress;
+mod value;
 
 pub use button::Button;
-pub use card::TempHumidCard;
+pub use card::{TempHumidCard, TempHumidCardData};
 pub use history::HistoryBar;
 pub use label::Label;
-pub use pressure_card::PressureCard;
+pub use pressure_card::{PressureCard, PressureCardData};
 pub use progress::ProgressBar;
+pub use value::{ValueRange, ValueStatus};
 
 use super::BoundingBox;
 use embedded_graphics::{pixelcolor::Rgb565, prelude::*};

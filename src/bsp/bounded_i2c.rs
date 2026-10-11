@@ -1,5 +1,5 @@
 //! Bounded I2C1 transactions. HAL 0.16's blocking methods have no deadline.
-use crate::clock::Clock;
+use crate::bsp::clock::Clock;
 use embedded_hal::blocking::i2c::{Read, Write, WriteRead};
 use stm32h7xx_hal::{
     i2c::I2c,
