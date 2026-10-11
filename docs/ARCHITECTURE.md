@@ -106,12 +106,24 @@ DMA FIFO 暂时饥饿与实际传输错误分开处理，细节及实板故障�
 - `RefreshRate` 按已完成的 10 秒窗口统计成功内容更新，不计底栏自身。
 - `ui::FlowAnimation` 按实际经过时间计算相位，独立于 5 秒采样周期。
 
+## 测试边界
+
+单元测试归对应模块：记录、格式化、调度、显示转换、AHT20、BMP280 的测试内联在
+源码的 `tests` 子模块；已有实现目录的显示驱动使用 `drivers/display/tests.rs`。
+单文件模块无需为了测试另建同名目录。
+根目录 `tests/acquisition.rs` 和 `tests/ui_rendering.rs` 通过库的公开 API 验证跨模块
+流程与画面回归，模拟屏幕共用 `tests/common/mod.rs`。根目录源码不再集中挂载回归测试。
+
+固件可执行文件要求默认启用的 `firmware` 特性；宿主机测试关闭默认特性，跳过裸机入口，
+再通过 `--lib --tests` 同时运行单元与集成测试。该特性不改变库的运行逻辑。
+CI 的宿主机测试作业复用 Makefile，说明见 [测试文档](../tests/README.md)。
+
 ## 验证入口
 
 | 命令 | 用途 |
 |---|---|
-| `make test` | 宿主机采样记录、采集、显示和 UI 回归测试 |
-| `make check` / `make check-host` | rustfmt、ARM 固件 / 显式 host target 库 Clippy |
+| `make test` | 宿主机模块单元测试与根目录 `tests/` 集成测试 |
+| `make check` / `make check-host` | rustfmt、ARM 固件 / 宿主机库与全部测试 Clippy |
 | `make check-bench` / `make check-features` | 测速配置 / 全特性（含 profiler）Clippy |
 | `make examples` | 外设示例构建 |
 | `make flash` | 普通固件构建、烧录与校验 |

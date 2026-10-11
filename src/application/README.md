@@ -30,4 +30,6 @@ UI 在控件中定义自己需要的 `TempHumidCardData`、`PressureCardData` �
 或 ESP 状态。卡片输入不携带历史和时间戳，因此仅这些信息变化不会触发重绘。
 
 采集与转换可在宿主机测试，硬件配置和运行入口由 ARM 条件编译隔离。
-`make test`、`make check-host`、`make check` 分别验证回归行为、宿主机库和固件。
+`make test` 同时运行模块单元测试和根目录集成测试，`make check-host` 检查宿主机库与全部测试，
+`make check` 检查固件。调度和显示转换单元测试内联在各自源码末尾的 `tests` 子模块中，
+跨模块采集流程位于 [tests/acquisition.rs](../../tests/acquisition.rs)，详见 [测试说明](../../tests/README.md)。

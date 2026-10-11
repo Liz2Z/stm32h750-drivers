@@ -277,3 +277,105 @@ impl Default for Bmp280 {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // BMP280 补偿示例：温度 25.08°C，气压约 1006.53hPa。
+    struct SensorBus {
+        bmp_present: bool,
+        calibration: [u8; 24],
+        measurement: [u8; 6],
+    }
+    impl SensorBus {
+        fn new() -> Self {
+            let coefficients: [i32; 12] = [
+                27504, 26435, -1000, 36477, -10685, 3024, 2855, 140, -7, 15500, -14600, 6000,
+            ];
+            let mut calibration = [0; 24];
+            for (i, value) in coefficients.iter().enumerate() {
+                calibration[i * 2..i * 2 + 2].copy_from_slice(&(*value as u16).to_le_bytes());
+            }
+            let pressure: u32 = 415148;
+            let temperature: u32 = 519888;
+            Self {
+                bmp_present: true,
+                calibration,
+                measurement: [
+                    (pressure >> 12) as u8,
+                    (pressure >> 4) as u8,
+                    (pressure << 4) as u8,
+                    (temperature >> 12) as u8,
+                    (temperature >> 4) as u8,
+                    (temperature << 4) as u8,
+                ],
+            }
+        }
+    }
+    impl Write for SensorBus {
+        type Error = ();
+        fn write(&mut self, addr: u8, _: &[u8]) -> Result<(), ()> {
+            if addr == 0x76 && self.bmp_present {
+                Ok(())
+            } else {
+                Err(())
+            }
+        }
+    }
+    impl WriteRead for SensorBus {
+        type Error = ();
+        fn write_read(&mut self, addr: u8, bytes: &[u8], buffer: &mut [u8]) -> Result<(), ()> {
+            if addr != 0x76 || !self.bmp_present {
+                return Err(());
+            }
+            match bytes {
+                [0xd0] => buffer[0] = 0x58,
+                [0x88] => buffer.copy_from_slice(&self.calibration),
+                [0xf7] => buffer.copy_from_slice(&self.measurement),
+                _ => return Err(()),
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn bmp_missing_device_is_an_initialization_error_and_can_recover() {
+        let mut bus = SensorBus::new();
+        let mut bmp = Bmp280::new();
+        bus.bmp_present = false;
+        assert!(matches!(
+            bmp.init(&mut bus, &mut |_| {}),
+            Err(Bmp280Error::DeviceNotFound)
+        ));
+        bus.bmp_present = true;
+        bmp.init(&mut bus, &mut |_| {}).unwrap();
+        let reading = bmp.read(&mut bus).unwrap();
+        assert!((reading.temperature - 25.08).abs() < 0.01);
+        assert!((reading.pressure - 1006.53).abs() < 0.1);
+        bus.bmp_present = false;
+        assert!(bmp.init(&mut bus, &mut |_| {}).is_err());
+        assert!(matches!(
+            bmp.read(&mut bus),
+            Err(Bmp280Error::DeviceNotFound)
+        ));
+    }
+
+    #[test]
+    fn bmp_rejects_invalid_calibration_and_reset_measurements() {
+        let mut bus = SensorBus::new();
+        bus.calibration[6..8].fill(0);
+        let mut bmp = Bmp280::new();
+        assert!(matches!(
+            bmp.init(&mut bus, &mut |_| {}),
+            Err(Bmp280Error::InvalidCalibration)
+        ));
+        let mut bus = SensorBus::new();
+        bmp.init(&mut bus, &mut |_| {}).unwrap();
+        bus.measurement = [0x80, 0, 0, 0x80, 0, 0];
+        assert!(matches!(
+            bmp.read(&mut bus),
+            Err(Bmp280Error::MeasurementNotReady)
+        ));
+    }
+}

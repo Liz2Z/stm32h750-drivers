@@ -13,7 +13,7 @@ examples:
 	cargo build --release --examples
 
 test:
-	cargo test --lib --target $(HOST_TARGET)
+	cargo test --lib --tests --no-default-features --target $(HOST_TARGET)
 
 fmt:
 	cargo fmt --all
@@ -23,7 +23,7 @@ check:
 	cargo clippy --lib --bin stm32h750-drivers -- -D warnings
 
 check-host:
-	cargo clippy --lib --target $(HOST_TARGET) -- -D warnings
+	cargo clippy --lib --tests --no-default-features --target $(HOST_TARGET) -- -D warnings
 
 check-bench:
 	cargo clippy --lib --bin stm32h750-drivers --features display-bench -- -D warnings

@@ -11,6 +11,13 @@ keywords = ["stm32", "stm32h750", "display", "ili9341", "embedded", "drivers", "
 categories = ["embedded", "hardware-support", "no-std"]
 exclude = [".vscode", ".claude", "docs/*.pdf"]
 
+[[bin]]
+name = "stm32h750-drivers"
+path = "src/main.rs"
+required-features = ["firmware"]
+test = false
+bench = false
+
 [dependencies]
 embedded-graphics = "0.7"
 embedded-hal = "0.2"
@@ -25,7 +32,9 @@ cortex-m-rt = "0.7"
 panic-halt = "1.0"
 
 [features]
-default = []
+default = ["firmware"]
+# 固件入口默认构建；宿主机测试关闭默认特性以跳过裸机可执行文件。
+firmware = []
 profiler = []
 display-bench = []
 

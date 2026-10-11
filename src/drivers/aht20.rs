@@ -106,3 +106,63 @@ impl Aht20 {
         Err(Aht20Error::Busy)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 这里只需模拟状态寄存器；忙状态超时前不应读取测量帧。
+    struct SensorBus {
+        calibrated: bool,
+        busy: bool,
+    }
+    impl SensorBus {
+        fn new() -> Self {
+            Self {
+                calibrated: true,
+                busy: false,
+            }
+        }
+    }
+    impl Write for SensorBus {
+        type Error = ();
+        fn write(&mut self, addr: u8, _: &[u8]) -> Result<(), ()> {
+            assert_eq!(addr, 0x38);
+            Ok(())
+        }
+    }
+    impl WriteRead for SensorBus {
+        type Error = ();
+        fn write_read(&mut self, addr: u8, bytes: &[u8], buffer: &mut [u8]) -> Result<(), ()> {
+            assert_eq!(addr, 0x38);
+            assert_eq!(bytes, &[0x71]);
+            buffer[0] = if self.calibrated { 8 } else { 0 } | if self.busy { 0x80 } else { 0 };
+            Ok(())
+        }
+    }
+    impl Read for SensorBus {
+        type Error = ();
+        fn read(&mut self, _: u8, _: &mut [u8]) -> Result<(), ()> {
+            panic!("忙状态超时不应读取测量帧");
+        }
+    }
+
+    #[test]
+    fn aht_checks_calibration_and_bounds_busy_polling() {
+        let mut bus = SensorBus::new();
+        bus.calibrated = false;
+        let mut sensor = Aht20::new();
+        assert!(matches!(
+            sensor.init(&mut bus, &mut |_| {}),
+            Err(Aht20Error::NotCalibrated)
+        ));
+        bus.calibrated = true;
+        bus.busy = true;
+        let mut waited_ms = 0;
+        assert!(matches!(
+            sensor.read(&mut bus, &mut |ms| waited_ms += ms),
+            Err(Aht20Error::Busy)
+        ));
+        assert_eq!(waited_ms, 180);
+    }
+}

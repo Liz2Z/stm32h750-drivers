@@ -51,3 +51,13 @@ pub(crate) fn pressure(values: Option<ValueRange>) -> heapless::String<16> {
         heapless::String::from("----hPa")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_pressure_uses_placeholder() {
+        assert_eq!(pressure(None).as_str(), "----hPa");
+    }
+}

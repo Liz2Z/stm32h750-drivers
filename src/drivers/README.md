@@ -82,7 +82,8 @@ DHT11 当前仍包含按自旋次数估计时序的实现，移植到其他主�
 ## 验证入口
 
 在项目根目录运行 `make test`，验证宿主机上的模拟总线、器件协议、显示及 UI 回归。
-`make check-host` 检查宿主机库，`make check` 检查 ARM 固件，`make check-features` 检查全部特性，
+AHT20、BMP280 的单元测试内联在各自源码的 `tests` 子模块，显示协议测试放在已有目录的 `display/tests.rs`。
+`make check-host` 检查宿主机库及全部测试，`make check` 检查 ARM 固件，`make check-features` 检查全部特性，
 `make examples` 构建外设示例。真实总线时序与屏幕显示还需上板验证。
 
 完整说明见 [项目架构](../../docs/ARCHITECTURE.md) 与

@@ -432,3 +432,34 @@ CFSR 始终为 0，SPI2 SR=0x1002。四次后自动删除断点并 detach，再�
 配置依据：[rust-analyzer 官方配置说明](https://rust-analyzer.github.io/book/configuration.html)。
 验证：`make check` 的 ARM 固件检查通过，`make test` 的 29 项宿主机测试全部通过；
 编辑器设置 JSON 解析及差异空白检查通过。尚未直接读取编辑器刷新后的诊断状态。
+
+## 19. 测试搬到 tests/ 后，必须同步目标选择与运行入口（2026-10-11）
+
+原 `src/regression_tests.rs` 集中放置调度、驱动协议、私有 UI 格式化和跨模块回归，
+模块归属不清楚。仅把文件移动到根目录 `tests/` 有两个问题：外部测试不能调用
+`pub(crate)` 格式化函数，而旧 `make test` 的 `--lib` 会完全跳过集成测试。
+
+修复：调度、底栏映射、AHT20/BMP280 协议单元测试内联到对应源码的 `tests` 子模块，
+记录与显示协议测试保持在所属模块。私有气压占位符断言提取为 UI 单元测试。
+采集流程和画面回归分别放入 `tests/acquisition.rs`、`tests/ui_rendering.rs`，
+通过 `stm32h750_drivers` 的公开接口调用库；模拟屏幕共用 `tests/common/mod.rs`。
+不为迁移测试扩大可见性，也不通过路径属性重复挂载生产源码。
+
+迁移时，显示转换测试原先通过 `presentation::status_bar` 调用；移入该模块的
+子模块后，应从 `super` 导入 `status_bar` 并直接调用，否则找不到原来的模块别名。
+
+Cargo 为集成测试自动构建可执行入口；裸机入口不能在宿主机编译。为固件 bin 设置
+`required-features = ["firmware"]`，默认启用该特性；宿主机测试关闭默认特性以跳过入口。
+`make test` 和 `make check-host` 都显式使用 host target、`--lib --tests` 和
+`--no-default-features`。CI 增加宿主机作业，复用这两个 Makefile 入口。
+
+验证：按函数名逐项核对，原有 29 项测试无缺失，新增独立的气压占位符单元测试。
+`make test` 实际执行 23 项单元测试、4 项采集集成测试、3 项 UI 集成测试，全部通过。
+原有十组 RGB565 画面摘要不变；`make check-host`、`make check`、
+`make check-features`、`make examples` 和 `make build` 全部通过。
+本次只调整测试组织及构建选择，默认 ARM 固件仍正常构建，未重复烧录。
+
+补充：最初机械地按测试长度拆分，为四个单文件模块分别建立了只含 `tests.rs` 的目录，
+增加目录层级却没有新增实现职责。已把这四处测试内联回源码末尾，移除空壳目录。
+仅在显示驱动等本身已有实现目录的模块中使用独立 `tests.rs`；跨模块测试仍位于根目录 `tests/`。
+内联后重新运行 `make test`、`make check-host` 和 `make check`，30 项测试与两类目标检查均通过。

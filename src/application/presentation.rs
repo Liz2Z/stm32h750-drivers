@@ -73,3 +73,47 @@ pub fn status_bar(
         refresh_centihz,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::status_bar;
+    #[test]
+    fn footer_mapping_preserves_labels_and_hides_disabled_connection() {
+        use crate::{
+            application::connection::{EspLinkState, UploadState},
+            ui::status::StatusTone,
+        };
+        for (link, text, tone) in [
+            (
+                EspLinkState::SerialReady,
+                "ESP: AT ready",
+                StatusTone::Normal,
+            ),
+            (
+                EspLinkState::WifiConnected,
+                "WiFi: connected",
+                StatusTone::Success,
+            ),
+            (EspLinkState::Failed, "ESP: failed", StatusTone::Failure),
+        ] {
+            for (upload, upload_text, upload_tone) in [
+                (UploadState::Disabled, "Upload: disabled", StatusTone::Muted),
+                (UploadState::Idle, "Upload: idle", StatusTone::Normal),
+                (UploadState::Ok, "Upload: ok", StatusTone::Success),
+                (UploadState::Failed, "Upload: failed", StatusTone::Failure),
+            ] {
+                let hidden = status_bar(false, link, upload, 42, Some(5920));
+                assert_eq!(hidden.connection, None);
+                assert_eq!(hidden.sample_count, 42);
+                assert_eq!(hidden.refresh_centihz, Some(5920));
+                let shown = status_bar(true, link, upload, 42, None);
+                let labels = shown.connection.unwrap();
+                assert_eq!((labels.link.text, labels.link.tone), (text, tone));
+                assert_eq!(
+                    (labels.upload.text, labels.upload.tone),
+                    (upload_text, upload_tone)
+                );
+            }
+        }
+    }
+}

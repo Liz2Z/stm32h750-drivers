@@ -33,4 +33,5 @@ UI 通过 embedded-graphics 的 `DrawTarget` 绘图，通过 `FlushTarget` 刷�
 [screen.rs](screen.rs) 为通用显示驱动实现刷新适配；SPI2、DMA 和缓冲存储由 BSP 实现。
 
 运行 `make test` 检查控件输入、局部刷新、失败重试和动画范围。
-像素快照测试直接构造 UI 输入，对比改动前画面，覆盖等待、失败、正常、旧值、恢复及底栏模式。
+私有格式化单元测试留在 `sensor_format.rs`；[tests/ui_rendering.rs](../../tests/ui_rendering.rs)
+通过公开 UI 输入验证完整画面。像素快照对比改动前画面，覆盖等待、失败、正常、旧值、恢复及底栏模式。

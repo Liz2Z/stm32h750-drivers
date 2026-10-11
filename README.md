@@ -165,14 +165,18 @@ src/
 │       ├── dma.rs           # DMA1 像素发送、超时和停流
 │       ├── framebuffer.rs   # AXI SRAM 缓冲存储与一次性领取
 │       └── bench.rs         # display-bench 特性下的实板测速
-├── ui/
+└── ui/
 │   ├── screen.rs            # 控件布局、脏区域和显示适配
 │   ├── sensor_format.rs     # 单位、占位符、状态文字
 │   ├── status.rs            # 底栏状态与刷新率
 │   ├── flow_animation.rs    # 顶部动画
 │   ├── theme.rs             # 原配色
 │   └── widgets/             # 卡片等控件；各自定义输入类型
-└── regression_tests.rs      # 采样、采集和 UI 集成回归测试
+
+tests/
+├── acquisition.rs           # 采集、状态转换与刷新协作
+├── ui_rendering.rs          # 完整画面、局部刷新和动画回归
+└── common/mod.rs            # 集成测试共享的模拟屏幕和布局
 ```
 
 ## 技术实现
@@ -193,7 +197,8 @@ src/
 - AHT20 和 BMP280 借用同一条 I2C 总线，独立采集与重试
 - 采集失败显示 `ERROR`；保留上次有效值时显示 `STALE`
 - I2C 事务和 SPI 传输具有超时，错误会返回应用层
-- `make test` 运行主机回归测试，`make check` 检查格式和 Clippy
+- `make test` 运行主机单元测试与集成测试，`make check-host` 同时检查测试代码；`make check` 检查 ARM 固件与格式
+- 测试按模块归属组织，根目录 `tests/` 验证公开接口协作，详见 [测试说明](tests/README.md)
 
 ### 实板显示测速
 
